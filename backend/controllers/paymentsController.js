@@ -44,7 +44,7 @@ const getPaymentById = async (req, res) => {
 const createPayment = async (req, res) => {
   try {
     const {
-      contract_id, contract_number, payment_type, amount, payment_method,
+      contract_id, quote_id, contract_number, payment_type, amount, payment_method,
       payment_account_id, payment_date, invoice_number, iva_amount, notes
     } = req.body;
     
@@ -55,8 +55,9 @@ const createPayment = async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *`,
       [
-        contract_id, contract_number, payment_type, amount, payment_method,
-        payment_account_id, payment_date, invoice_number, iva_amount, notes
+        contract_id || quote_id, contract_number, payment_type, amount, payment_method,
+        payment_account_id, payment_date, invoice_number, iva_amount, 
+        notes || JSON.stringify({ quote_id })
       ]
     );
     
@@ -72,7 +73,7 @@ const updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      contract_id, contract_number, payment_type, amount, payment_method,
+      contract_id, quote_id, contract_number, payment_type, amount, payment_method,
       payment_account_id, payment_date, invoice_number, iva_amount, notes
     } = req.body;
     
@@ -85,8 +86,9 @@ const updatePayment = async (req, res) => {
       WHERE id = $11
       RETURNING *`,
       [
-        contract_id, contract_number, payment_type, amount, payment_method,
-        payment_account_id, payment_date, invoice_number, iva_amount, notes, id
+        contract_id || quote_id, contract_number, payment_type, amount, payment_method,
+        payment_account_id, payment_date, invoice_number, iva_amount, 
+        notes || JSON.stringify({ quote_id }), id
       ]
     );
     

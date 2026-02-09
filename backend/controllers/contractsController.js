@@ -1,3 +1,4 @@
+const axios = require('axios');
 const pool = require('../config/db');
 
 // Get all contracts
@@ -45,7 +46,8 @@ const createContract = async (req, res) => {
   try {
     const {
       contract_number, quote_id, client_id, start_date, end_date,
-      origin, destination, itinerary, passenger_count, total_amount, status
+      origin, destination, itinerary, passenger_count, total_amount, status,
+      notes, vehicle_name, num_units, event_type
     } = req.body;
     
     if (!contract_number) {
@@ -55,17 +57,89 @@ const createContract = async (req, res) => {
     const result = await pool.query(
       `INSERT INTO contracts (
         contract_number, quote_id, client_id, start_date, end_date,
-        origin, destination, itinerary, passenger_count, total_amount, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        origin, destination, itinerary, passenger_count, total_amount, status,
+        notes, num_units, event_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *`,
       [
         contract_number, quote_id, client_id, start_date, end_date,
         origin, destination, itinerary, passenger_count, total_amount,
-        status || 'Agendado'
+        status || 'Agendado', notes, num_units, event_type
       ]
     );
     
-    res.status(201).json({ success: true, data: result.rows[0] });
+    let newContract = result.rows[0];
+    
+    // Try to create Google Calendar event if vehicle_name is provided
+    if (vehicle_name && process.env.GOOGLE_CALENDAR_SCRIPT_URL) {
+      try {
+        // Get client name
+        const clientResult = await pool.query('SELECT name FROM clients WHERE id = $1', [client_id]);
+        const clientName = clientResult.rows[0]?.name || 'Cliente';
+        
+        // Parse itinerary to get formatted text
+        let itineraryText = '';
+        try {
+          const itineraryData = typeof itinerary === 'string' ? JSON.parse(itinerary) : itinerary;
+          if (Array.isArray(itineraryData)) {
+            itineraryText = itineraryData.map((day, idx) => {
+              const destinations = day.destinations?.filter(d => d.trim()).join(' → ') || '';
+              return `Día ${idx + 1} (${day.date || ''}): ${destinations}`;
+            }).join('\n');
+          }
+        } catch {
+          itineraryText = typeof itinerary === 'string' ? itinerary : '';
+        }
+        
+        // Parse notes to get more details
+        let notesData = {};
+        try {
+          notesData = typeof notes === 'string' ? JSON.parse(notes) : notes;
+        } catch {}
+        
+        const calendarData = {
+          unidad: vehicle_name,
+          titulo: `Contrato #${contract_number} - ${clientName}`,
+          descripcion: `Servicio de transporte`,
+          fechaInicio: start_date,
+          fechaFin: end_date,
+          origen: origin || '',
+          destino: destination || '',
+          pasajeros: passenger_count || 0,
+          cliente: clientName,
+          contrato: contract_number,
+          itinerario: itineraryText
+        };
+        
+        console.log('Sending to Google Calendar:', calendarData);
+        
+        const calendarResponse = await axios.post(
+          process.env.GOOGLE_CALENDAR_SCRIPT_URL,
+          calendarData,
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 10000
+          }
+        );
+        
+        console.log('Google Calendar response:', calendarResponse.data);
+        
+        if (calendarResponse.data.success && calendarResponse.data.eventoId) {
+          // Save the event ID in the database
+          const updateResult = await pool.query(
+            'UPDATE contracts SET calendar_event_id = $1 WHERE id = $2 RETURNING *',
+            [calendarResponse.data.eventoId, newContract.id]
+          );
+          newContract = updateResult.rows[0];
+          console.log('✅ Event ID saved:', calendarResponse.data.eventoId);
+        }
+      } catch (calendarError) {
+        console.error('Error creating calendar event:', calendarError.message);
+        // Don't fail the contract creation if calendar fails
+      }
+    }
+    
+    res.status(201).json({ success: true, data: newContract });
   } catch (error) {
     console.error('Error creating contract:', error);
     res.status(500).json({ success: false, error: error.message });

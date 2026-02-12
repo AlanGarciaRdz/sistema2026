@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Fragment } from 'react';
-import { getQuotes, getClients, deleteQuote, createQuote, updateQuote } from '../services/api';
+import { getQuotes, getClients, deleteQuote, createQuote, updateQuote, createContract } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
@@ -17,6 +17,10 @@ const Quotes = () => {
   const [viewingQuote, setViewingQuote] = useState(null);
   const [editingQuoteData, setEditingQuoteData] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const [showVehicleModal, setShowVehicleModal] = useState(false);
+  const [vehicleName, setVehicleName] = useState('');
 
   useEffect(() => {
     fetchQuotes();
@@ -36,6 +40,8 @@ const Quotes = () => {
 
   const handleView = (quote) => {
     setViewingQuote(quote);
+    setSelectedStatus(quote.status || 'Pendiente');
+    setEditingStatus(false);
   };
 
   const handleEditQuote = (quote) => {
@@ -50,6 +56,106 @@ const Quotes = () => {
     // Close view modal and open calculator
     setViewingQuote(null);
     setIsCalculatorOpen(true);
+  };
+
+  const generateContractNumber = () => {
+    const now = new Date();
+    const year = String(now.getFullYear()).slice(-2);
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    return `${year}${month}${day}${hour}${minute}`;
+  };
+
+  const handleStatusChange = async () => {
+    // If changing to "Aprobada" and wasn't already approved, ask for vehicle name
+    if (selectedStatus === 'Aprobada' && viewingQuote.status !== 'Aprobada') {
+      setShowVehicleModal(true);
+      return;
+    }
+
+    // For other status changes, just update
+    await updateQuoteStatus();
+  };
+
+  const updateQuoteStatus = async () => {
+    try {
+      // Update quote status
+      const updateData = {
+        ...viewingQuote,
+        status: selectedStatus
+      };
+
+      await updateQuote(viewingQuote.id, updateData);
+      
+      setToast({ message: 'Estado actualizado exitosamente', type: 'success' });
+      setEditingStatus(false);
+      fetchQuotes();
+      setViewingQuote(null);
+    } catch (error) {
+      console.error('Error updating status:', error);
+      setToast({ message: 'Error al actualizar estado', type: 'error' });
+    }
+  };
+
+  const handleGenerateContract = async () => {
+    if (!vehicleName.trim()) {
+      setToast({ message: 'Por favor ingresa el nombre de la unidad', type: 'error' });
+      return;
+    }
+
+    try {
+      const contractNumber = generateContractNumber();
+      const quoteData = parseQuoteData(viewingQuote.notes);
+      
+      const contractData = {
+        contract_number: contractNumber,
+        client_id: viewingQuote.client_id,
+        quote_id: viewingQuote.id,
+        start_date: viewingQuote.start_date,
+        end_date: viewingQuote.end_date,
+        origin: viewingQuote.origin,
+        destination: viewingQuote.destination,
+        event_type: viewingQuote.event_type || 'Cotización',
+        itinerary: viewingQuote.itinerary,
+        num_units: viewingQuote.num_units || 1,
+        passenger_count: viewingQuote.passenger_count || 0,
+        total_amount: viewingQuote.total_amount,
+        status: 'Activo',
+        notes: viewingQuote.notes,
+        vehicle_name: vehicleName.trim()
+      };
+
+      const contractResponse = await createContract(contractData);
+      const createdContract = contractResponse.data.data;
+      
+      // Update quote status to Aprobada and save calendar_event_id if available
+      const updateData = {
+        ...viewingQuote,
+        status: 'Aprobada',
+        calendar_event_id: createdContract.calendar_event_id || null
+      };
+      await updateQuote(viewingQuote.id, updateData);
+
+      const successMessage = createdContract.calendar_event_id
+        ? `Contrato #${contractNumber} generado y evento creado en Google Calendar`
+        : `Contrato #${contractNumber} generado (evento de calendario no creado)`;
+
+      setToast({ 
+        message: successMessage, 
+        type: 'success' 
+      });
+
+      setShowVehicleModal(false);
+      setVehicleName('');
+      setEditingStatus(false);
+      fetchQuotes();
+      setViewingQuote(null);
+    } catch (error) {
+      console.error('Error generating contract:', error);
+      setToast({ message: 'Error al generar contrato: ' + error.message, type: 'error' });
+    }
   };
 
   const handleDelete = async (quote) => {
@@ -80,6 +186,7 @@ const Quotes = () => {
         distances: data.distances || {},
         costs: data.costs || {},
         results: data.results || null,
+        agreedAmount: data.agreedAmount || '',
         whatsappClient: data.whatsapp_client || '',
         whatsappInternal: data.whatsapp_internal || '',
         manualAdjustments: data.manualAdjustments || {},
@@ -123,13 +230,13 @@ const Quotes = () => {
         client_id: quoteData.client_id,
         days: quoteData.days,
         distances: quoteData.distances,
-        costs: quoteData.costs, 
-        results: quoteData.results, 
+        costs: quoteData.costs,
+        results: quoteData.results,
+        agreedAmount: quoteData.agreedAmount,
         whatsapp_client: quoteData.whatsapp_client,
         whatsapp_internal: quoteData.whatsapp_internal,
         manualAdjustments: quoteData.manualAdjustments,
         daysNights: quoteData.daysNights
-
       };
 
       // Prepare data for API
@@ -143,7 +250,7 @@ const Quotes = () => {
         itinerary: JSON.stringify(quoteData.days),
         num_units: 1,
         passenger_count: quoteData.results?.quotations[0]?.capacity || 0,
-        total_amount: quoteData.results?.quotations[0]?.costs.total || 0,
+        total_amount: parseFloat(quoteData.agreedAmount) || quoteData.results?.quotations[0]?.costs.total || 0,
         status: 'Pendiente',
         notes: JSON.stringify(completeQuoteData) // Save everything as JSON
       };
@@ -304,7 +411,61 @@ const Quotes = () => {
         >
           <div className="space-y-6">
             {/* Action Buttons */}
-            <div className="flex justify-end gap-2 border-b pb-4">
+            <div className="flex justify-between items-center gap-2 border-b pb-4">
+              <div className="flex items-center gap-4">
+                {!editingStatus ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700">Estado:</span>
+                      <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+                        viewingQuote.status === 'Pendiente' ? 'bg-yellow-100 text-yellow-800' :
+                        viewingQuote.status === 'Enviada' ? 'bg-blue-100 text-blue-800' :
+                        viewingQuote.status === 'Aprobada' ? 'bg-green-100 text-green-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {viewingQuote.status}
+                      </span>
+                    </div>
+                    <Button
+                      onClick={() => setEditingStatus(true)}
+                      variant="secondary"
+                      size="sm"
+                    >
+                      Cambiar Estado
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      value={selectedStatus}
+                      onChange={(e) => setSelectedStatus(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="Pendiente">Pendiente</option>
+                      <option value="Enviada">Enviada</option>
+                      <option value="Aprobada">Aprobada</option>
+                      <option value="Rechazada">Rechazada</option>
+                    </select>
+                    <Button
+                      onClick={() => {
+                        setEditingStatus(false);
+                        setSelectedStatus(viewingQuote.status);
+                      }}
+                      variant="secondary"
+                      size="sm"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleStatusChange}
+                      variant="success"
+                      size="sm"
+                    >
+                      💾 Guardar
+                    </Button>
+                  </>
+                )}
+              </div>
               
               <Button
                 onClick={() => handleEditQuote(viewingQuote)}
@@ -577,6 +738,74 @@ const Quotes = () => {
                 </div>
               );
             })()}
+          </div>
+        </Modal>
+      )}
+
+      {/* Vehicle Name Modal */}
+      {showVehicleModal && (
+        <Modal
+          isOpen={showVehicleModal}
+          onClose={() => {
+            setShowVehicleModal(false);
+            setVehicleName('');
+            setEditingStatus(false);
+          }}
+          title="🚌 Seleccionar Unidad para Contrato"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+              <p className="text-sm text-blue-800">
+                <strong>📋 Generando Contrato #{generateContractNumber()}</strong>
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Se creará un evento automático en Google Calendar
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nombre de la Unidad *
+              </label>
+              <input
+                type="text"
+                value={vehicleName}
+                onChange={(e) => setVehicleName(e.target.value)}
+                placeholder="Ej: Autobús 1, Sprinter A, Van 3..."
+                className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                autoFocus
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Este nombre se usará para buscar el calendario en Google Calendar
+              </p>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-xs text-yellow-800">
+                ⚠️ <strong>Importante:</strong> Asegúrate de que existe un calendario en Google Calendar 
+                con este nombre exacto.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                onClick={() => {
+                  setShowVehicleModal(false);
+                  setVehicleName('');
+                  setEditingStatus(false);
+                }}
+                variant="secondary"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleGenerateContract}
+                variant="success"
+              >
+                ✅ Generar Contrato y Evento
+              </Button>
+            </div>
           </div>
         </Modal>
       )}

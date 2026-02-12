@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ContractService from '../components/ContractService';
 import { getContracts, deleteContract } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
@@ -9,6 +10,7 @@ const Contracts = () => {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [isContratoServicioOpen, setIsContratoServicioOpen] = useState(false);
 
   useEffect(() => {
     fetchContracts();
@@ -76,11 +78,26 @@ const Contracts = () => {
 
   return (
     <div className="p-6">
-      <Header title="Contratos" />
+      
+      <Header title="Contratos" 
+        buttonText="+ Contrato/Servicio"
+        onButtonClick={() => {
+          setIsContratoServicioOpen(true);
+        }}
+      />
       <Table
         columns={columns}
         data={contracts}
         onDelete={handleDelete}
+      />
+
+      <ContractService
+        isOpen={isContratoServicioOpen}
+        onClose={() => {
+          setIsContratoServicioOpen(false);
+        }}
+        //onSave={handleSaveContract}
+        //editingContract={editingContract}
       />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

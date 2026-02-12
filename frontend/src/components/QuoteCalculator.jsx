@@ -44,6 +44,7 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
   });
 
   const [results, setResults] = useState(null);
+  const [agreedAmount, setAgreedAmount] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientType, setClientType] = useState('existing'); // 'existing' or 'new'
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -68,6 +69,7 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
         setDaysNights({ days: 0, nights: 0 });
         setResults(null);
         setSelectedVehicles([]);
+        setAgreedAmount('');
       }
     }
     return () => {
@@ -87,7 +89,8 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
       setManualAdjustments(editingQuote.manualAdjustments || { adjustedDistance: 0, extraMovements: 0 });
       setDaysNights(editingQuote.daysNights || { days: 0, nights: 0 });
       setResults(editingQuote.results || null);
-
+      setAgreedAmount(editingQuote.agreedAmount || '');
+      
       // Auto-select all vehicles if results exist
       if (editingQuote.results?.quotations) {
         setSelectedVehicles(editingQuote.results.quotations.map((_, index) => index));
@@ -449,6 +452,7 @@ ${quotesDetailed}
       daysNights: daysNights,
       costs: costs,
       results: results,
+      agreedAmount: agreedAmount,
       whatsapp_client: generateClientWhatsApp(),
       whatsapp_internal: generateInternalWhatsApp()
     };
@@ -882,6 +886,50 @@ ${quotesDetailed}
                       </div>
                     </div>
                   ))}
+                </div>
+
+                {/* Agreed Amount Input */}
+                <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-green-900 mb-2">
+                    💰 Monto Acordado con el Cliente (Opcional)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={agreedAmount}
+                    onChange={(e) => setAgreedAmount(e.target.value)}
+                    placeholder="Ingresa el monto final acordado"
+                    className="w-full border-2 border-green-300 rounded-lg px-4 py-3 text-lg font-semibold focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-green-700 mt-2">
+                    Este monto se mostrará en la tabla de cotizaciones. Si no se especifica, se usará el precio de la primera unidad.
+                  </p>
+                </div>
+
+                {/* Agreed Amount Input */}
+                <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-5 shadow-md">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-2xl">💰</span>
+                    <h4 className="text-lg font-bold text-green-900">Monto Acordado con el Cliente</h4>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={agreedAmount}
+                    onChange={(e) => setAgreedAmount(e.target.value)}
+                    placeholder="Ingresa el precio final acordado (ej: 87000)"
+                    className="w-full border-2 border-green-400 rounded-lg px-4 py-3 text-xl font-bold text-green-900 focus:ring-2 focus:ring-green-500 focus:border-transparent placeholder:text-green-300"
+                  />
+                  <p className="text-sm text-green-700 mt-2">
+                    <strong>Importante:</strong> Este monto se mostrará en la tabla principal de cotizaciones. Si no lo llenas, se usará el precio de la primera unidad generada.
+                  </p>
+                  {agreedAmount && (
+                    <div className="mt-3 bg-green-200 p-3 rounded-lg">
+                      <p className="text-green-900 font-bold text-center text-2xl">
+                        Monto Final: ${parseFloat(agreedAmount).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* WhatsApp Copy Buttons */}

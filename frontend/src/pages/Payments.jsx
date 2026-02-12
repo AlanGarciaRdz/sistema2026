@@ -106,14 +106,26 @@ const Payments = () => {
   };
 
   const handleEdit = (payment) => {
+    // Parse notes to get quote_id if exists
+    let sourceType = 'contract';
+    let sourceId = payment.contract_id || '';
+    
+    try {
+      const notesData = JSON.parse(payment.notes || '{}');
+      if (notesData.quote_id) {
+        sourceType = 'quote';
+        sourceId = notesData.quote_id;
+      }
+    } catch {}
+    
     setEditingPayment(payment);
     setFormData({
-      sourceType: payment.quote_id ? 'quote' : 'contract',
-      sourceId: payment.quote_id || payment.contract_id || '',
+      sourceType: sourceType,
+      sourceId: String(sourceId),
       paymentType: payment.payment_type || 'Parcial',
       amount: payment.amount || '',
       paymentMethod: payment.payment_method || 'Efectivo',
-      accountId: payment.account_id || '',
+      accountId: payment.payment_account_id || '',
       paymentDate: payment.payment_date ? payment.payment_date.split('T')[0] : new Date().toISOString().split('T')[0],
       invoiceNumber: payment.invoice_number || ''
     });
@@ -124,16 +136,22 @@ const Payments = () => {
     e.preventDefault();
     
     try {
+      // Store quote_id in notes as JSON if it's a quote payment
+      const additionalNotes = formData.sourceType === 'quote' 
+        ? JSON.stringify({ quote_id: formData.sourceId })
+        : null;
+
       const paymentData = {
         contract_id: formData.sourceType === 'contract' ? formData.sourceId : null,
-        quote_id: formData.sourceType === 'quote' ? formData.sourceId : null,
+        contract_number: null, // Can be filled if needed
         payment_type: formData.paymentType,
         amount: parseFloat(formData.amount),
         payment_method: formData.paymentMethod,
-        account_id: formData.accountId || null,
+        payment_account_id: formData.accountId || null,
         payment_date: formData.paymentDate,
-        invoice_number: formData.invoiceNumber,
-        status: 'Completado'
+        invoice_number: formData.invoiceNumber || null,
+        iva_amount: null,
+        notes: additionalNotes
       };
 
       let savedPayment;
@@ -165,27 +183,60 @@ const Payments = () => {
     try {
       // Get source data (quote or contract)
       let serviceData = null;
-      if (formData.sourceType === 'quote') {
-        const quote = quotes.find(q => q.id === parseInt(formData.sourceId));
+      let sourceId = null;
+      
+      // Try to get quote_id from notes first
+      try {
+        const notesData = JSON.parse(payment.notes || '{}');
+        if (notesData.quote_id) {
+          sourceId = notesData.quote_id;
+          formData.sourceType = 'quote';
+        }
+      } catch {}
+      
+      // If no quote_id in notes, use contract_id
+      if (!sourceId && payment.contract_id) {
+        sourceId = payment.contract_id;
+        formData.sourceType = 'contract';
+      }
+
+      if (formData.sourceType === 'quote' && sourceId) {
+        const quote = quotes.find(q => q.id === parseInt(sourceId));
+        if (quote) {
+          serviceData = {
+            type: 'Cotización',
+            number: quote.id || '',
+            client: quote.client_name || 'N/A',
+            origin: quote.origin || '',
+            destination: quote.destination || '',
+            startDate: quote.start_date || '',
+            endDate: quote.end_date || '',
+            totalAmount: quote.total_amount || 0
+          };
+        }
+      } else if (formData.sourceType === 'contract' && sourceId) {
+        const contract = contracts.find(c => c.id === parseInt(sourceId));
+        if (contract) {
+          serviceData = {
+            type: 'Contrato',
+            number: contract.contract_number || '',
+            client: contract.client_name || 'N/A',
+            startDate: contract.start_date || '',
+            endDate: contract.end_date || '',
+            totalAmount: contract.total_amount || 0
+          };
+        }
+      }
+
+      // Fallback if no service data found
+      if (!serviceData) {
         serviceData = {
-          type: 'Cotización',
-          number: quote?.id || '',
-          client: quote?.client_name || 'N/A',
-          origin: quote?.origin || '',
-          destination: quote?.destination || '',
-          startDate: quote?.start_date || '',
-          endDate: quote?.end_date || '',
-          totalAmount: quote?.total_amount || 0
-        };
-      } else {
-        const contract = contracts.find(c => c.id === parseInt(formData.sourceId));
-        serviceData = {
-          type: 'Contrato',
-          number: contract?.contract_number || '',
-          client: contract?.client_name || 'N/A',
-          startDate: contract?.start_date || '',
-          endDate: contract?.end_date || '',
-          totalAmount: contract?.total_amount || 0
+          type: 'Servicio',
+          number: 'N/A',
+          client: 'N/A',
+          startDate: '',
+          endDate: '',
+          totalAmount: payment.amount
         };
       }
 
@@ -292,7 +343,19 @@ const Payments = () => {
   };
 
   const columns = [
-    { header: 'Contrato', accessor: 'contract_number' },
+    { 
+      header: 'Origen', 
+      render: (row) => {
+        try {
+          const notesData = JSON.parse(row.notes || '{}');
+          if (notesData.quote_id) {
+            const quote = quotes.find(q => q.id === parseInt(notesData.quote_id));
+            return `Cotización #${notesData.quote_id}${quote ? ` - ${quote.client_name}` : ''}`;
+          }
+        } catch {}
+        return row.contract_number ? `Contrato ${row.contract_number}` : 'N/A';
+      }
+    },
     { header: 'Tipo', accessor: 'payment_type' },
     { header: 'Monto', render: (row) => formatCurrency(row.amount) },
     { header: 'Método', accessor: 'payment_method' },

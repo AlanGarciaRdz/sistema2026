@@ -4,7 +4,31 @@ import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
 
+const UNIT_TYPES = [
+    'Autobus',
+    'Sprinter / Crafter',
+    'Van Hiace / Urvan',
+    'Mini Van',
+    'Suburban',
+    'Auto 4-6 plazas',
+  ];
+
+  const generateContractNumber = () => {
+    const now = new Date();
+    const year = String(now.getFullYear()).slice(-2);
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    return `${year}${month}${day}${hour}${minute}`;
+  };
+
 const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
+
+    // ── mode & folio ──
+    const [mode, setMode] = useState('contrato');
+    const [folio] = useState(generateContractNumber);
+  
     // Client data
     const [clients, setClients] = useState([]);
     const [selectedClient, setSelectedClient] = useState(null);
@@ -13,21 +37,33 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const [vehicles, setVehicles] = useState([]);
     const [selectedVehicle, setSelectedVehicle] = useState(null);
 
-    // Driver data (you may need to add getDrivers to your API)
-    const [drivers, setDrivers] = useState([]);
-    const [selectedDriver, setSelectedDriver] = useState('');
-
-    // Trip details
-    const [origin, setOrigin] = useState('');
-    const [destination, setDestination] = useState('');
-    const [dateStart, setDateStart] = useState('');
-    const [dateEnd, setDateEnd] = useState('');
-    const [capacity, setCapacity] = useState('');
-    const [status, setStatus] = useState('scheduled'); // scheduled, in_progress, complete
-
     const [loading, setLoading] = useState(false);
     const [toast, setToast] = useState(null);
 
+
+        // ── shared fields ──
+    const [contactName,  setContactName]  = useState('');
+    const [contactPhone, setContactPhone] = useState('');
+    const [origin,       setOrigin]       = useState('');
+    const [destination,  setDestination]  = useState('');
+    const [unitType,     setUnitType]     = useState(UNIT_TYPES[2]);
+    const [total,        setTotal]        = useState('');
+    const [notes,        setNotes]        = useState('');
+    const [status,       setStatus]       = useState('scheduled');  // scheduled, in_progress, complete
+
+    // ── contrato-only ──
+    const [departure,     setDeparture]     = useState('');
+    const [departureTime, setDepartureTime] = useState('');
+    const [returnDate,    setReturnDate]    = useState('');
+    const [returnTime,    setReturnTime]    = useState('');
+    const [capacity,      setCapacity]      = useState('');
+
+    // ── servicio-only ──
+    const [serviceDate, setServiceDate] = useState('');
+    const [serviceTime, setServiceTime] = useState('');
+    
+
+    
     // Load initial data
     useEffect(() => {
         if (isOpen) {
@@ -44,18 +80,54 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         };
     }, [isOpen]);
 
+    useEffect(() => {
+        if (editingContract) {
+          setMode(editingContract.mode || 'contrato');
+          setSelectedClient(editingContract.client || null);
+          setSelectedVehicle(editingContract.vehicle || null);
+          setContactName(editingContract.contactName || '');
+          setContactPhone(editingContract.contactPhone || '');
+          setOrigin(editingContract.origin || '');
+          setDestination(editingContract.destination || '');
+          setUnitType(editingContract.unitType || UNIT_TYPES[2]);
+          setTotal(editingContract.total ?? '');
+          setNotes(editingContract.notes || '');
+          setStatus(editingContract.status || 'scheduled');
+          setDeparture(editingContract.departure || '');
+          setDepartureTime(editingContract.departureTime || '');
+          setReturnDate(editingContract.returnDate || '');
+          setReturnTime(editingContract.returnTime || '');
+          setCapacity(editingContract.capacity || '');
+          setServiceDate(editingContract.serviceDate || '');
+          setServiceTime(editingContract.serviceTime || '');
+        } else {
+          resetForm();
+        }
+      }, [editingContract, isOpen]);
+
+    
+
     // Load editing contract data
     useEffect(() => {
         if (editingContract) {
-            setSelectedClient(editingContract.client);
-            setSelectedVehicle(editingContract.vehicle);
-            setSelectedDriver(editingContract.driver || '');
+            setMode(editingContract.mode || 'contrato');
+            setSelectedClient(editingContract.client || null);
+            setSelectedVehicle(editingContract.vehicle || null);
+            setContactName(editingContract.contactName || '');
+            setContactPhone(editingContract.contactPhone || '');
             setOrigin(editingContract.origin || '');
             setDestination(editingContract.destination || '');
-            setDateStart(editingContract.dateStart || '');
-            setDateEnd(editingContract.dateEnd || '');
-            setCapacity(editingContract.capacity || '');
+            setUnitType(editingContract.unitType || UNIT_TYPES[2]);
+            setTotal(editingContract.total ?? '');
+            setNotes(editingContract.notes || '');
             setStatus(editingContract.status || 'scheduled');
+            setDeparture(editingContract.departure || '');
+            setDepartureTime(editingContract.departureTime || '');
+            setReturnDate(editingContract.returnDate || '');
+            setReturnTime(editingContract.returnTime || '');
+            setCapacity(editingContract.capacity || '');
+            setServiceDate(editingContract.serviceDate || '');
+            setServiceTime(editingContract.serviceTime || '');
         } else {
             resetForm();
         }
@@ -64,10 +136,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const fetchClients = async () => {
         try {
             setLoading(true);
-            const response = await getVehicles();
+            const response = await getClients();
             setClients(response.data.data);
           } catch (error) {
-            setToast({ message: 'Error al cargar vehículos', type: 'error' });
+            setToast({ message: 'Error al cargar clientes', type: 'error' });
           } finally {
             setLoading(false);
           }
@@ -99,250 +171,394 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const resetForm = () => {
         setSelectedClient(null);
         setSelectedVehicle(null);
-        setSelectedDriver('');
+        setContactName('');
+        setContactPhone('');
         setOrigin('');
         setDestination('');
-        setDateStart('');
-        setDateEnd('');
-        setCapacity('');
+        setUnitType(UNIT_TYPES[2]);
+        setTotal('');
+        setNotes('');
         setStatus('scheduled');
+        setDeparture('');
+        setDepartureTime('');
+        setReturnDate('');
+        setReturnTime('');
+        setCapacity('');
+        setServiceDate('');
+        setServiceTime('');
     };
 
     const handleClientSelect = (e) => {
         const clientId = e.target.value;
+        console.log(clientId);
         const client = clients.find(c => c.id === clientId);
+        console.log(client);
         setSelectedClient(client);
+    };
+
+    const handleVehicleSelect = (e) => {
+        const vehicleId = e.target.value;
+        console.log(vehicleId);
+        const vehicle = vehicles.find(v => v.id === vehicleId);
+        console.log(vehicle);
+        setSelectedVehicle(vehicle);
+        
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-
-        const contractData = {
-            client: selectedClient,
-            vehicle: selectedVehicle,
-            driver: selectedDriver,
-            origin,
-            destination,
-            dateStart,
-            dateEnd,
-            capacity,
-            status
+        const base = {
+        folio,
+        mode,
+        client: selectedClient,
+        vehicle: selectedVehicle,
+        contactName,
+        contactPhone,
+        origin,
+        destination,
+        unitType,
+        total: parseFloat(total) || 0,
+        notes,
+        status,
         };
+        const payload = mode === 'contrato'
+        ? { ...base, departure, departureTime, returnDate, returnTime, capacity: parseInt(capacity) || null }
+        : { ...base, serviceDate, serviceTime };
 
-        onSave(contractData);
+        //onSave(payload);
         resetForm();
         onClose();
-    };
+  };
+
+  const handleClose = () => { resetForm(); onClose(); };
+
+  
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose}>
-            <div className="max-w-4xl mx-auto">
-                <h1 className="text-2xl font-bold text-gray-800 mb-6">
-                    {editingContract ? 'Edit Contract/Service' : 'New Contract/Service'}
-                </h1>
+        <Modal isOpen={isOpen} onClose={handleClose}>
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Client Selection */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h2 className="text-lg font-semibold text-gray-700 mb-4">1. Client Information</h2>
-                        
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Select Client *
-                            </label>
-                            <select
-                                value={selectedClient?.id || ''}
-                                onChange={handleClientSelect}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                required
-                            >
-                                <option value="">-- Choose a client --</option>
-                                {clients.map(client => (
-                                    <option key={client.id} value={client.id}>
-                                        {client.name} - {client.phone}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+        {/* HEADER */}
+        <div className="mb-1">
+          <h1 className="text-base font-semibold text-gray-900">
+            {editingContract
+              ? (mode === 'contrato' ? 'Editar contrato' : 'Editar servicio')
+              : (mode === 'contrato' ? 'Nuevo contrato'  : 'Nuevo servicio')}
+          </h1>
+          <span className="inline-block mt-1 font-mono text-[11px] font-medium text-gray-400 bg-gray-100 rounded px-2 py-0.5 tracking-wider">
+            Folio: {editingContract?.folio || folio}
+          </span>
+        </div>
 
-                        {selectedClient && (
-                            <div className="bg-blue-50 rounded-lg p-4 space-y-2">
-                                <p className="text-sm"><strong>Name:</strong> {selectedClient.name}</p>
-                                <p className="text-sm"><strong>Phone:</strong> {selectedClient.phone}</p>
-                                {selectedClient.email && <p className="text-sm"><strong>Email:</strong> {selectedClient.email}</p>}
-                                {selectedClient.address && <p className="text-sm"><strong>Address:</strong> {selectedClient.address}</p>}
-                            </div>
-                        )}
-                    </div>
+        {/* TABS */}
+        <div className="flex gap-1 border-b border-gray-100 mt-4 mb-5">
+          <button
+            type="button"
+            onClick={() => setMode('contrato')}
+            className={`flex-1 py-2.5 text-sm font-medium border-b-2 border-x-0 border-t-0 bg-transparent transition-colors cursor-pointer ${
+              mode === 'contrato'
+                ? 'text-gray-900 border-gray-900'
+                : 'text-gray-400 border-transparent hover:text-gray-600'
+            }`}
+          >
+            Contrato foráneo
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('servicio')}
+            className={`flex-1 py-2.5 text-sm font-medium border-b-2 border-x-0 border-t-0 bg-transparent transition-colors cursor-pointer ${
+              mode === 'servicio'
+                ? 'text-gray-900 border-gray-900'
+                : 'text-gray-400 border-transparent hover:text-gray-600'
+            }`}
+          >
+            Servicio local
+          </button>
+        </div>
 
-                    {/* Vehicle Selection */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h2 className="text-lg font-semibold text-gray-700 mb-4">2. Vehicle Selection</h2>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {vehicles.map(vehicle => (
-                                <div
-                                    key={vehicle.id}
-                                    onClick={() => setSelectedVehicle(vehicle)}
-                                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                                        selectedVehicle?.id === vehicle.id
-                                            ? 'bg-blue-100 border-blue-600 shadow-lg'
-                                            : 'bg-gray-50 border-gray-300 hover:border-blue-400'
-                                    }`}
-                                >
-                                    <div className="flex justify-between items-start mb-2">
-                                        <h4 className="font-semibold text-blue-900">{vehicle.type || vehicle.model}</h4>
-                                        {selectedVehicle?.id === vehicle.id && (
-                                            <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs">
-                                                ✓
-                                            </div>
-                                        )}
-                                    </div>
-                                    <p className="text-sm text-gray-600">{vehicle.plate}</p>
-                                    {vehicle.capacity && (
-                                        <p className="text-sm text-gray-500">Capacity: {vehicle.capacity}</p>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
 
-                    {/* Driver Selection */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h2 className="text-lg font-semibold text-gray-700 mb-4">3. Driver Assignment</h2>
-                        
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Select Driver (Optional)
-                            </label>
-                            <select
-                                value={selectedDriver}
-                                onChange={(e) => setSelectedDriver(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                                <option value="">-- Choose a driver --</option>
-                                {drivers.map(driver => (
-                                    <option key={driver.id} value={driver.id}>
-                                        {driver.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
+          {/* CLIENTE */}
+          <div className="flex flex-col gap-3">
 
-                    {/* Trip Details */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-6">
-                        <h2 className="text-lg font-semibold text-gray-700 mb-4">4. Trip Details</h2>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Origin *
-                                </label>
-                                <input
-                                    type="text"
-                                    value={origin}
-                                    onChange={(e) => setOrigin(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Starting location"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Destination *
-                                </label>
-                                <input
-                                    type="text"
-                                    value={destination}
-                                    onChange={(e) => setDestination(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="End location"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Date Start *
-                                </label>
-                                <input
-                                    type="datetime-local"
-                                    value={dateStart}
-                                    onChange={(e) => setDateStart(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Date End *
-                                </label>
-                                <input
-                                    type="datetime-local"
-                                    value={dateEnd}
-                                    onChange={(e) => setDateEnd(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Capacity (Passengers)
-                                </label>
-                                <input
-                                    type="number"
-                                    value={capacity}
-                                    onChange={(e) => setCapacity(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Number of passengers"
-                                    min="1"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Status *
-                                </label>
-                                <select
-                                    value={status}
-                                    onChange={(e) => setStatus(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    required
-                                >
-                                    <option value="scheduled">Scheduled</option>
-                                    <option value="in_progress">In Progress</option>
-                                    <option value="complete">Complete</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex justify-end space-x-4 pt-4">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                resetForm();
-                                onClose();
-                            }}
-                            className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                            {editingContract ? 'Update Contract' : 'Create Contract'}
-                        </button>
-                    </div>
-                </form>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Seleccionar cliente existente</label>
+              <select
+                value={selectedClient?.id || ''}
+                onChange={handleClientSelect}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+              >
+                <option value="">— Buscar cliente —</option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>
+                ))}
+              </select>
+              {selectedClient && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                  <span><strong className="text-gray-700">Tel:</strong> {selectedClient.phone}</span>
+                  {selectedClient.email   && <span><strong className="text-gray-700">Email:</strong> {selectedClient.email}</span>}
+                  {selectedClient.address && <span><strong className="text-gray-700">Dir:</strong> {selectedClient.address}</span>}
+                </div>
+              )}
             </div>
-        </Modal>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">
+                  Contratante / nombre <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Nombre completo o empresa"
+                  value={contactName}
+                  onChange={e => setContactName(e.target.value)}
+                  required
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">Teléfono</label>
+                <input
+                  type="tel"
+                  placeholder="10 dígitos"
+                  value={contactPhone}
+                  onChange={e => setContactPhone(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                />
+              </div>
+            </div>
+
+          </div>
+
+          <hr className="border-gray-100" />
+
+          {/* ITINERARIO */}
+          <div className="grid grid-cols-2 gap-3">
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">
+                Origen <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Punto de salida"
+                value={origin}
+                onChange={e => setOrigin(e.target.value)}
+                required
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">
+                Destino <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Punto de llegada"
+                value={destination}
+                onChange={e => setDestination(e.target.value)}
+                required
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            {mode === 'contrato' ? (
+              <>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">
+                    Fecha salida <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={departure}
+                    onChange={e => setDeparture(e.target.value)}
+                    required
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">
+                    Hora salida <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={departureTime}
+                    onChange={e => setDepartureTime(e.target.value)}
+                    required
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Fecha regreso</label>
+                  <input
+                    type="date"
+                    value={returnDate}
+                    onChange={e => setReturnDate(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Hora regreso</label>
+                  <input
+                    type="time"
+                    value={returnTime}
+                    onChange={e => setReturnTime(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">
+                    Fecha del servicio <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={serviceDate}
+                    onChange={e => setServiceDate(e.target.value)}
+                    required
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Hora</label>
+                  <input
+                    type="time"
+                    value={serviceTime}
+                    onChange={e => setServiceTime(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                  />
+                </div>
+              </>
+            )}
+
+          </div>
+
+          <hr className="border-gray-100" />
+
+          {/* UNIDAD */}
+          <div className="grid grid-cols-2 gap-3">
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Seleccionar vehículo</label>
+              <select
+                value={selectedVehicle?.id || ''}
+                onChange={handleVehicleSelect}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+              >
+                <option value="">— Seleccionar —</option>
+                {vehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.plate} · {v.type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">
+                Tipo de unidad <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={unitType}
+                onChange={e => setUnitType(e.target.value)}
+                required
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+              >
+                {UNIT_TYPES.map(u => <option key={u}>{u}</option>)}
+              </select>
+            </div>
+
+            {mode === 'contrato' && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">Capacidad (pasajeros)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Núm. pasajeros"
+                  value={capacity}
+                  onChange={e => setCapacity(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Status</label>
+              <select
+                value={status}
+                onChange={e => setStatus(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+              >
+                <option value="scheduled">Programado</option>
+                <option value="in_progress">En curso</option>
+                <option value="complete">Completado</option>
+              </select>
+            </div>
+
+          </div>
+
+          <hr className="border-gray-100" />
+
+          {/* PAGO + NOTAS */}
+          <div className="grid grid-cols-2 gap-3">
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">
+                Total del servicio <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={total}
+                  onChange={e => setTotal(e.target.value)}
+                  required
+                  className="w-full text-sm border border-gray-200 rounded-lg pl-6 pr-3 py-2 font-medium text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1 col-span-2">
+              <label className="text-xs font-medium text-gray-500">Detalles del viaje</label>
+              <textarea
+                placeholder="Indicaciones, paradas intermedias, restricciones…"
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition resize-y min-h-[72px]"
+              />
+            </div>
+
+          </div>
+
+          {/* FOOTER */}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              {editingContract
+                ? (mode === 'contrato' ? 'Actualizar contrato' : 'Actualizar servicio')
+                : (mode === 'contrato' ? 'Crear contrato'      : 'Crear servicio')}
+            </button>
+          </div>
+
+        </form>
+      </Modal>
     );
 };
 

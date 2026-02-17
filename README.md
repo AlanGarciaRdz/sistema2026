@@ -287,3 +287,20 @@ This project is proprietary software for internal use.
 ## Support
 
 For questions or issues, please contact the development team.
+
+
+
+google id ipmlementacion
+AKfycbwxYDgipfvmqWjK_1073LaekamCe9TyWdj07Lx7KmMQ1AKAafvAmDKTOZq8iefseXnwSA
+app web url 
+https://script.google.com/macros/s/AKfycbwxYDgipfvmqWjK_1073LaekamCe9TyWdj07Lx7KmMQ1AKAafvAmDKTOZq8iefseXnwSA/exec
+
+## 📅 Google Calendar Integration
+
+Ver documentación completa en: [GOOGLE_CALENDAR_SETUP.md](./GOOGLE_CALENDAR_SETUP.md)
+
+### Resumen:
+- Al aprobar una cotización, se genera automáticamente un contrato
+- El sistema solicita el nombre de la unidad (vehículo)
+- Se crea un evento automático en Google Calendar
+- Formato de contrato: YYMMDDHHMM (ejemplo: 2602061647)

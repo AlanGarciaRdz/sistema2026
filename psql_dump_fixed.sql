@@ -44,6 +44,7 @@ CREATE TABLE quotes (
     status VARCHAR(50) DEFAULT 'Pendiente',
     valid_until DATE,
     notes TEXT,
+    calendar_event_id VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -62,6 +63,11 @@ CREATE TABLE contracts (
     passenger_count INTEGER,
     total_amount DECIMAL(10,2),
     status VARCHAR(50) DEFAULT 'Agendado',
+    notes TEXT,
+    num_units INTEGER DEFAULT 1,
+    event_type VARCHAR(100),
+    calendar_event_id VARCHAR(255),
+    vehicle_name VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

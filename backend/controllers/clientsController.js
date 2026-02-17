@@ -4,8 +4,9 @@ const pool = require('../config/db');
 const getAllClients = async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM clients ORDER BY created_at DESC'
+      'SELECT * FROM clients ORDER BY name'
     );
+    console.log(result.rows);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('Error fetching clients:', error);

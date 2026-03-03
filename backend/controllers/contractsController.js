@@ -47,6 +47,7 @@ const createContract = async (req, res) => {
     const {
       contract_number, quote_id, client_id, start_date, end_date,
       origin, destination, itinerary, passenger_count, total_amount, status,
+      origin_maps, destination_maps,
       notes, vehicle_name, num_units, event_type
     } = req.body;
     
@@ -57,13 +58,15 @@ const createContract = async (req, res) => {
     const result = await pool.query(
       `INSERT INTO contracts (
         contract_number, quote_id, client_id, start_date, end_date,
-        origin, destination, itinerary, passenger_count, total_amount, status,
+        origin, origin_maps, destination, destination_maps,
+        itinerary, passenger_count, total_amount, status,
         notes, num_units, event_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         contract_number, quote_id, client_id, start_date, end_date,
-        origin, destination, itinerary, passenger_count, total_amount,
+        origin, origin_maps, destination, destination_maps,
+        itinerary, passenger_count, total_amount,
         status || 'Agendado', notes, num_units, event_type
       ]
     );
@@ -152,21 +155,27 @@ const updateContract = async (req, res) => {
     const { id } = req.params;
     const {
       contract_number, quote_id, client_id, start_date, end_date,
-      origin, destination, itinerary, passenger_count, total_amount, status
+      origin, origin_maps, destination, destination_maps,
+      itinerary, passenger_count, total_amount, status,
+      notes, num_units, event_type, vehicle_name, calendar_event_id
     } = req.body;
     
     const result = await pool.query(
       `UPDATE contracts SET
         contract_number = $1, quote_id = $2, client_id = $3, start_date = $4,
-        end_date = $5, origin = $6, destination = $7, itinerary = $8,
-        passenger_count = $9, total_amount = $10, status = $11,
+        end_date = $5, origin = $6, origin_maps = $7, destination = $8, destination_maps = $9,
+        itinerary = $10, passenger_count = $11, total_amount = $12, status = $13,
+        notes = $14, num_units = $15, event_type = $16, vehicle_name = $17, calendar_event_id = $18,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $12
+      WHERE id = $19
       RETURNING *`,
       [
         contract_number, quote_id, client_id, start_date, end_date,
-        origin, destination, itinerary, passenger_count, total_amount,
-        status, id
+        origin, origin_maps, destination, destination_maps,
+        itinerary, passenger_count, total_amount,
+        status,
+        notes, num_units, event_type, vehicle_name, calendar_event_id,
+        id
       ]
     );
     

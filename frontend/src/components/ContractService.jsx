@@ -45,7 +45,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const [contactName,  setContactName]  = useState('');
     const [contactPhone, setContactPhone] = useState('');
     const [origin,       setOrigin]       = useState('');
+    const [originMaps,   setOriginMaps]   = useState('');
     const [destination,  setDestination]  = useState('');
+    const [destinationMaps, setDestinationMaps] = useState('');
+    const [itineraryText, setItineraryText] = useState('');
     const [unitType,     setUnitType]     = useState(UNIT_TYPES[2]);
     const [total,        setTotal]        = useState('');
     const [notes,        setNotes]        = useState('');
@@ -88,7 +91,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
           setContactName(editingContract.contactName || '');
           setContactPhone(editingContract.contactPhone || '');
           setOrigin(editingContract.origin || '');
+          setOriginMaps(editingContract.originMaps || '');
           setDestination(editingContract.destination || '');
+          setDestinationMaps(editingContract.destinationMaps || '');
+          setItineraryText(editingContract.itineraryText || '');
           setUnitType(editingContract.unitType || UNIT_TYPES[2]);
           setTotal(editingContract.total ?? '');
           setNotes(editingContract.notes || '');
@@ -116,7 +122,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
             setContactName(editingContract.contactName || '');
             setContactPhone(editingContract.contactPhone || '');
             setOrigin(editingContract.origin || '');
+            setOriginMaps(editingContract.originMaps || '');
             setDestination(editingContract.destination || '');
+            setDestinationMaps(editingContract.destinationMaps || '');
+            setItineraryText(editingContract.itineraryText || '');
             setUnitType(editingContract.unitType || UNIT_TYPES[2]);
             setTotal(editingContract.total ?? '');
             setNotes(editingContract.notes || '');
@@ -174,7 +183,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         setContactName('');
         setContactPhone('');
         setOrigin('');
+        setOriginMaps('');
         setDestination('');
+        setDestinationMaps('');
+        setItineraryText('');
         setUnitType(UNIT_TYPES[2]);
         setTotal('');
         setNotes('');
@@ -190,32 +202,38 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
 
     const handleClientSelect = (e) => {
         const clientId = e.target.value;
-        console.log(clientId);
-        const client = clients.find(c => c.id === clientId);
-        console.log(client);
+        const client = clients.find((c) => String(c.id) === String(clientId)) || null;
         setSelectedClient(client);
+
+        // Autofill contractor/contact fields from the selected client
+        if (client) {
+          setContactName(client.name || '');
+          setContactPhone(client.phone || '');
+        }
     };
 
     const handleVehicleSelect = (e) => {
         const vehicleId = e.target.value;
-        console.log(vehicleId);
-        const vehicle = vehicles.find(v => v.id === vehicleId);
-        console.log(vehicle);
+        const vehicle = vehicles.find((v) => String(v.id) === String(vehicleId)) || null;
         setSelectedVehicle(vehicle);
         
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const currentFolio = editingContract?.folio || editingContract?.contract_number || folio;
         const base = {
-        folio,
+        folio: currentFolio,
         mode,
         client: selectedClient,
         vehicle: selectedVehicle,
         contactName,
         contactPhone,
         origin,
+        originMaps,
         destination,
+        destinationMaps,
+        itineraryText,
         unitType,
         total: parseFloat(total) || 0,
         notes,
@@ -225,7 +243,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         ? { ...base, departure, departureTime, returnDate, returnTime, capacity: parseInt(capacity) || null }
         : { ...base, serviceDate, serviceTime };
 
-        //onSave(payload);
+        onSave(payload);
         resetForm();
         onClose();
   };
@@ -363,6 +381,39 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
               />
             </div>
 
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Ubicación Origen (Google Maps)</label>
+              <input
+                type="text"
+                placeholder="Pega enlace o dirección de Google Maps (opcional)"
+                value={originMaps}
+                onChange={(e) => setOriginMaps(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Ubicación Destino (Google Maps)</label>
+              <input
+                type="text"
+                placeholder="Pega enlace o dirección de Google Maps (opcional)"
+                value={destinationMaps}
+                onChange={(e) => setDestinationMaps(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            <div className="col-span-2 flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Itinerario (opcional)</label>
+              <textarea
+                rows={3}
+                placeholder="Texto libre del itinerario (ciudades, horarios, notas de ruta, etc.)"
+                value={itineraryText}
+                onChange={(e) => setItineraryText(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition resize-y"
+              />
+            </div>
+
             {mode === 'contrato' ? (
               <>
                 <div className="flex flex-col gap-1">
@@ -454,7 +505,9 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
               >
                 <option value="">— Seleccionar —</option>
                 {vehicles.map(v => (
-                  <option key={v.id} value={v.id}>{v.plate} · {v.type}</option>
+                  <option key={v.id} value={v.id}>
+                    {(v.license_plate || v.plate || '-')}{v.vehicle_code ? ` · ${v.vehicle_code}` : ''}{v.model ? ` · ${v.model}` : ''}{v.vehicle_type ? ` · ${v.vehicle_type}` : ''}
+                  </option>
                 ))}
               </select>
             </div>

@@ -106,19 +106,27 @@ const Clients = () => {
   if (loading) return <Loading />;
 
   return (
-    <div className="p-6">
-      <Header
-        title="Clientes"
-        buttonText="+ Nuevo Cliente"
-        onButtonClick={() => setIsModalOpen(true)}
-      />
+    <div className="p-4 sm:p-6">
+      {/* Header: stacks vertically on mobile, horizontal on md+ */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
+        <h1 className="text-xl font-semibold text-gray-800">Clientes</h1>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+        >
+          + Nuevo Cliente
+        </button>
+      </div>
 
-      <Table
-        columns={columns}
-        data={clients}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
-      />
+      {/* Table wrapped in scrollable container for small screens */}
+      <div className="w-full overflow-x-auto rounded-lg border border-gray-200">
+        <Table
+          columns={columns}
+          data={clients}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+        />
+      </div>
 
       <Modal
         isOpen={isModalOpen}
@@ -163,7 +171,7 @@ const Clients = () => {
             value={formData.address}
             onChange={(e) => setFormData({ ...formData, address: e.target.value })}
           />
-          <div className="flex justify-end gap-3 mt-6">
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-6">
             <Button variant="secondary" onClick={handleCloseModal} type="button">
               Cancelar
             </Button>

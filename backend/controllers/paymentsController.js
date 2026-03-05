@@ -17,6 +17,25 @@ const getAllPayments = async (req, res) => {
   }
 };
 
+// Get payments by contract number
+const getPaymentsByContractNumber = async (req, res) => {
+  try {
+    const { contract_number } = req.params;
+    const result = await pool.query(`
+      SELECT p.*, co.contract_number, pa.account_name
+      FROM payments p
+      LEFT JOIN contracts co ON p.contract_id = co.id
+      LEFT JOIN payment_accounts pa ON p.payment_account_id = pa.id
+      WHERE p.contract_number = $1 OR co.contract_number = $1
+      ORDER BY p.payment_date ASC
+    `, [contract_number]);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Error fetching payments by contract:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 // Get payment by ID
 const getPaymentById = async (req, res) => {
   try {
@@ -124,6 +143,7 @@ const deletePayment = async (req, res) => {
 module.exports = {
   getAllPayments,
   getPaymentById,
+  getPaymentsByContractNumber,
   createPayment,
   updatePayment,
   deletePayment

@@ -5,11 +5,11 @@ const pool = require('../config/db');
 const getAllContracts = async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT co.*, c.name as client_name, q.quote_number
+      SELECT co.*, c.name as client_name, c.phone as client_phone, q.quote_number
       FROM contracts co
       LEFT JOIN clients c ON co.client_id = c.id
       LEFT JOIN quotes q ON co.quote_id = q.id
-      ORDER BY co.created_at DESC
+      ORDER BY co.start_date DESC NULLS LAST
     `);
     res.json({ success: true, data: result.rows });
   } catch (error) {
@@ -23,7 +23,7 @@ const getContractById = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT co.*, c.name as client_name, q.quote_number
+      SELECT co.*, c.name as client_name, c.phone as client_phone, q.quote_number
       FROM contracts co
       LEFT JOIN clients c ON co.client_id = c.id
       LEFT JOIN quotes q ON co.quote_id = q.id

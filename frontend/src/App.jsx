@@ -11,6 +11,7 @@ import Drivers from './pages/Drivers';
 import Vehicles from './pages/Vehicles';
 import Assignments from './pages/Assignments';
 import PaymentAccounts from './pages/PaymentAccounts';
+import Trips from './pages/Trips';
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
               <Route path="/drivers" element={<Drivers />} />
               <Route path="/vehicles" element={<Vehicles />} />
               <Route path="/assignments" element={<Assignments />} />
+              <Route path="/trips" element={<Trips />} />
               <Route path="/payment-accounts" element={<PaymentAccounts />} />
             </Routes>
           </div>

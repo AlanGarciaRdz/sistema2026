@@ -9,7 +9,7 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions }) => {
           <tr>
             {columns.map((column, index) => (
               <th
-                style={column.width ? { width: column.width } : undefined}
+                style={column.width ? { width: column.width } : column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
                 key={index}
                 className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
               >
@@ -28,7 +28,11 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions }) => {
             data.map((row, rowIndex) => (
               <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
                 {columns.map((column, colIndex) => (
-                  <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td
+                    key={colIndex}
+                    className={`px-6 py-4 text-sm text-gray-900 ${column.wrap ? 'whitespace-normal' : 'whitespace-nowrap'}`}
+                    style={column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
+                  >
                     {column.render ? column.render(row) : row[column.accessor]}
                   </td>
                 ))}

@@ -1,10 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ContractService from '../components/ContractService';
 import { getContracts, deleteContract, createContract, updateContract } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
+import { FileDown, Copy, Eye } from 'lucide-react';
+import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
+import TripSummaryModal from '../components/TripSummaryModal';
+
+const generateContractNumber = () => {
+  const now = new Date();
+  const y = String(now.getFullYear()).slice(-2);
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const h = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  return `${y}${m}${d}${h}${min}`;
+};
 
 const Contracts = () => {
   const [contracts, setContracts] = useState([]);
@@ -12,6 +25,14 @@ const Contracts = () => {
   const [toast, setToast] = useState(null);
   const [isContratoServicioOpen, setIsContratoServicioOpen] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
+
+  const [filterFechaInicio, setFilterFechaInicio] = useState('');
+  const [filterFechaFin, setFilterFechaFin] = useState('');
+  const [filterCliente, setFilterCliente] = useState('');
+  const [filterNoContrato, setFilterNoContrato] = useState('');
+  const [filterEstado, setFilterEstado] = useState('');
+  const [filterDestino, setFilterDestino] = useState('');
+  const [summaryRow, setSummaryRow] = useState(null);
 
   useEffect(() => {
     fetchContracts();
@@ -122,7 +143,7 @@ const Contracts = () => {
       itineraryText: row.itinerary || '',
       unitType: notesData.unitType || '',
       total: row.total_amount ?? '',
-      notes: notesData.uiNotes || '',
+      notes:  notesData.notes ?? '',
       status: statusReverseMap[row.status] || 'scheduled',
       departure: mode === 'contrato' ? startDateStr : '',
       returnDate: mode === 'contrato' ? endDateStr : '',
@@ -134,6 +155,62 @@ const Contracts = () => {
     });
 
     setIsContratoServicioOpen(true);
+  };
+
+  const handleCopy = (row) => {
+    let notesData = {};
+    try {
+      notesData = row.notes ? JSON.parse(row.notes) : {};
+    } catch {}
+
+    const statusReverseMap = {
+      Agendado: 'scheduled',
+      'En proceso': 'in_progress',
+      Realizado: 'complete'
+    };
+
+    const mode = notesData.mode || 'contrato';
+    const startDateStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
+    const endDateStr = row.end_date ? String(row.end_date).slice(0, 10) : '';
+
+    setEditingContract({
+      id: null,
+      folio: generateContractNumber(),
+      mode,
+      client: row.client_id ? { id: row.client_id, name: row.client_name, phone: notesData.contactPhone || '' } : null,
+      vehicle: notesData.vehicle || null,
+      contactName: notesData.contactName || '',
+      contactPhone: notesData.contactPhone || '',
+      origin: row.origin || '',
+      originMaps: row.origin_maps || '',
+      destination: row.destination || '',
+      destinationMaps: row.destination_maps || '',
+      itineraryText: row.itinerary || '',
+      unitType: notesData.unitType || '',
+      total: row.total_amount ?? '',
+      notes: notesData.uiNotes ?? notesData.notes ?? '',
+      status: statusReverseMap[row.status] || 'scheduled',
+      departure: mode === 'contrato' ? startDateStr : '',
+      returnDate: mode === 'contrato' ? endDateStr : '',
+      departureTime: notesData.departureTime || '',
+      returnTime: notesData.returnTime || '',
+      capacity: row.passenger_count || '',
+      serviceDate: mode === 'servicio' ? startDateStr : '',
+      serviceTime: mode === 'servicio' ? (notesData.serviceTime || '') : ''
+    });
+
+    setIsContratoServicioOpen(true);
+  };
+
+  const handleGeneratePdf = async (row) => {
+    try {
+      const info = await buildPdfInfoFromRow(row);
+      await generateContractPdf(info);
+      setToast({ message: 'PDF generado correctamente', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ message: 'Error al generar PDF', type: 'error' });
+    }
   };
 
   const handleDelete = async (contract) => {
@@ -160,16 +237,70 @@ const Contracts = () => {
     return new Date(date).toLocaleDateString('es-MX');
   };
 
+  const getUnitType = (row) => {
+    try {
+      const n = row.notes ? JSON.parse(row.notes) : {};
+      return n.unitType || '-';
+    } catch { return '-'; }
+  };
+
+  const filteredContracts = useMemo(() => {
+    return contracts.filter((row) => {
+      const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
+      const endStr = row.end_date ? String(row.end_date).slice(0, 10) : startStr;
+      if (filterFechaInicio && startStr && startStr < filterFechaInicio) return false;
+      if (filterFechaFin && endStr && endStr > filterFechaFin) return false;
+      if (filterCliente) {
+        const c = (row.client_name || '').toLowerCase();
+        if (!c.includes(filterCliente.toLowerCase())) return false;
+      }
+      if (filterNoContrato) {
+        const n = (row.contract_number || '').toLowerCase();
+        if (!n.includes(filterNoContrato.toLowerCase())) return false;
+      }
+      if (filterEstado && row.status !== filterEstado) return false;
+      if (filterDestino) {
+        const d = (row.destination || '').toLowerCase();
+        if (!d.includes(filterDestino.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [contracts, filterFechaInicio, filterFechaFin, filterCliente, filterNoContrato, filterEstado, filterDestino]);
+
+  const getAssignedUnit = (row) => {
+    if (row.vehicle_name) return row.vehicle_name;
+    try {
+      const n = row.notes ? JSON.parse(row.notes) : {};
+      const v = n.vehicle;
+      if (!v) return null;
+      return v.license_plate || v.vehicle_code || v.plate || null;
+    } catch { return null; }
+  };
+
   const columns = [
-    { header: 'No. Contrato', accessor: 'contract_number' },
-    { header: 'Cliente', accessor: 'client_name' },
-    { header: 'Origen', accessor: 'origin' },
-    { header: 'Destino', accessor: 'destination' },
-    { header: 'Fecha Inicio', render: (row) => formatDate(row.start_date) },
-    { header: 'Fecha Fin', render: (row) => formatDate(row.end_date) },
-    { header: 'Monto Total', render: (row) => formatCurrency(row.total_amount) },
+    {
+      header: 'No. Contrato',
+      width: '120px',
+      render: (row) => {
+        const unit = getAssignedUnit(row);
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="font-medium">{row.contract_number}</span>
+            <span className="text-xs text-gray-500">{getUnitType(row)}</span>
+            {unit && <span className="text-xs text-blue-600 font-medium">{unit}</span>}
+          </div>
+        );
+      }
+    },
+    { header: 'Cliente', accessor: 'client_name', maxWidth: '120px', wrap: true },
+    { header: 'Origen', accessor: 'origin', maxWidth: '120px', wrap: true },
+    { header: 'Destino', accessor: 'destination', maxWidth: '120px', wrap: true },
+    { header: 'Fecha Inicio', render: (row) => formatDate(row.start_date), width: '95px' },
+    { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
+    { header: 'Monto Total', render: (row) => formatCurrency(row.total_amount), width: '100px' },
     { 
       header: 'Estado', 
+      width: '100px',
       render: (row) => (
         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
           row.status === 'Agendado' ? 'bg-green-100 text-green-800' :
@@ -190,17 +321,112 @@ const Contracts = () => {
       <Header title="Contratos" 
         buttonText="+ Contrato/Servicio"
         onButtonClick={() => {
+          setEditingContract(null);
           setIsContratoServicioOpen(true);
         }}
       />
+
+      <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Filtros</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Fecha inicio</label>
+            <input
+              type="date"
+              value={filterFechaInicio}
+              onChange={(e) => setFilterFechaInicio(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Fecha fin</label>
+            <input
+              type="date"
+              value={filterFechaFin}
+              onChange={(e) => setFilterFechaFin(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Cliente</label>
+            <input
+              type="text"
+              placeholder="Buscar..."
+              value={filterCliente}
+              onChange={(e) => setFilterCliente(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">No. contrato</label>
+            <input
+              type="text"
+              placeholder="Buscar..."
+              value={filterNoContrato}
+              onChange={(e) => setFilterNoContrato(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
+            <select
+              value={filterEstado}
+              onChange={(e) => setFilterEstado(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            >
+              <option value="">Todos</option>
+              <option value="Agendado">Agendado</option>
+              <option value="En proceso">En proceso</option>
+              <option value="Realizado">Realizado</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Destino</label>
+            <input
+              type="text"
+              placeholder="Buscar..."
+              value={filterDestino}
+              onChange={(e) => setFilterDestino(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+            />
+          </div>
+        </div>
+      </div>
+
       <Table
         columns={columns}
-        data={contracts}
+        data={filteredContracts}
         onEdit={handleEdit}
         onDelete={handleDelete}
+        customActions={(row) => (
+          <>
+            <button
+              onClick={() => setSummaryRow(row)}
+              className="text-blue-600 hover:text-blue-800 transition-colors p-1"
+              title="Resumen del viaje"
+            >
+              <Eye size={18} />
+            </button>
+            <button
+              onClick={() => handleCopy(row)}
+              className="text-blue-600 hover:text-blue-800 transition-colors p-1"
+              title="Copiar servicio"
+            >
+              <Copy size={18} />
+            </button>
+            <button
+              onClick={() => handleGeneratePdf(row)}
+              className="text-amber-600 hover:text-amber-800 transition-colors p-1"
+              title="Generar PDF"
+            >
+              <FileDown size={18} />
+            </button>
+          </>
+        )}
       />
 
       <ContractService
+        key={editingContract?.id ?? 'new'}
         isOpen={isContratoServicioOpen}
         onClose={() => {
           setIsContratoServicioOpen(false);
@@ -208,6 +434,11 @@ const Contracts = () => {
         }}
         onSave={handleSaveContract}
         editingContract={editingContract}
+      />
+      <TripSummaryModal
+        isOpen={!!summaryRow}
+        onClose={() => setSummaryRow(null)}
+        row={summaryRow}
       />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

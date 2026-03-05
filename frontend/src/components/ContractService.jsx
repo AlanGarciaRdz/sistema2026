@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getClients, getVehicles } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
+import { buildPdfInfoFromForm, generateContractPdf } from '../utils/contractPdfUtils';
 
 const UNIT_TYPES = [
     'Autobus',
@@ -83,39 +84,12 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         };
     }, [isOpen]);
 
+    const loadedEditIdRef = useRef(null);
     useEffect(() => {
-        if (editingContract) {
-          setMode(editingContract.mode || 'contrato');
-          setSelectedClient(editingContract.client || null);
-          setSelectedVehicle(editingContract.vehicle || null);
-          setContactName(editingContract.contactName || '');
-          setContactPhone(editingContract.contactPhone || '');
-          setOrigin(editingContract.origin || '');
-          setOriginMaps(editingContract.originMaps || '');
-          setDestination(editingContract.destination || '');
-          setDestinationMaps(editingContract.destinationMaps || '');
-          setItineraryText(editingContract.itineraryText || '');
-          setUnitType(editingContract.unitType || UNIT_TYPES[2]);
-          setTotal(editingContract.total ?? '');
-          setNotes(editingContract.notes || '');
-          setStatus(editingContract.status || 'scheduled');
-          setDeparture(editingContract.departure || '');
-          setDepartureTime(editingContract.departureTime || '');
-          setReturnDate(editingContract.returnDate || '');
-          setReturnTime(editingContract.returnTime || '');
-          setCapacity(editingContract.capacity || '');
-          setServiceDate(editingContract.serviceDate || '');
-          setServiceTime(editingContract.serviceTime || '');
-        } else {
-          resetForm();
-        }
-      }, [editingContract, isOpen]);
-
-    
-
-    // Load editing contract data
-    useEffect(() => {
-        if (editingContract) {
+        if (editingContract && isOpen) {
+          const loadKey = editingContract.id ?? editingContract.folio ?? 'copy';
+          if (loadedEditIdRef.current !== loadKey) {
+            loadedEditIdRef.current = loadKey;
             setMode(editingContract.mode || 'contrato');
             setSelectedClient(editingContract.client || null);
             setSelectedVehicle(editingContract.vehicle || null);
@@ -128,7 +102,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
             setItineraryText(editingContract.itineraryText || '');
             setUnitType(editingContract.unitType || UNIT_TYPES[2]);
             setTotal(editingContract.total ?? '');
-            setNotes(editingContract.notes || '');
+            setNotes(editingContract.notes ?? '');
             setStatus(editingContract.status || 'scheduled');
             setDeparture(editingContract.departure || '');
             setDepartureTime(editingContract.departureTime || '');
@@ -137,10 +111,12 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
             setCapacity(editingContract.capacity || '');
             setServiceDate(editingContract.serviceDate || '');
             setServiceTime(editingContract.serviceTime || '');
+          }
         } else {
-            resetForm();
+          loadedEditIdRef.current = null;
+          if (!editingContract) resetForm();
         }
-    }, [editingContract, isOpen]);
+      }, [editingContract, isOpen]);
 
     const fetchClients = async () => {
         try {
@@ -249,6 +225,37 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
   };
 
   const handleClose = () => { resetForm(); onClose(); };
+
+  const handleGeneratePdf = async () => {
+    try {
+      const currentFolio = editingContract?.folio || editingContract?.contract_number || folio;
+      const info = await buildPdfInfoFromForm({
+        mode,
+        folio: currentFolio,
+        contactName,
+        contactPhone,
+        origin,
+        destination,
+        itineraryText,
+        notes,
+        unitType,
+        capacity,
+        total,
+        departure,
+        departureTime,
+        returnDate,
+        returnTime,
+        serviceDate,
+        serviceTime,
+        selectedClient
+      });
+      await generateContractPdf(info);
+      setToast({ message: 'PDF generado correctamente', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ message: 'Error al generar PDF', type: 'error' });
+    }
+  };
 
   
 
@@ -592,22 +599,33 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
           </div>
 
           {/* FOOTER */}
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-between items-center pt-1">
             <button
               type="button"
-              onClick={handleClose}
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors cursor-pointer"
+              onClick={handleGeneratePdf}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors cursor-pointer flex items-center gap-2"
+              title="Generar PDF"
             >
-              Cancelar
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Generar PDF
             </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors cursor-pointer"
-            >
-              {editingContract
-                ? (mode === 'contrato' ? 'Actualizar contrato' : 'Actualizar servicio')
-                : (mode === 'contrato' ? 'Crear contrato'      : 'Crear servicio')}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                {editingContract
+                  ? (mode === 'contrato' ? 'Actualizar contrato' : 'Actualizar servicio')
+                  : (mode === 'contrato' ? 'Crear contrato'      : 'Crear servicio')}
+              </button>
+            </div>
           </div>
 
         </form>

@@ -383,8 +383,8 @@ const Payments = () => {
   return (
     <div className="p-6">
       <Header 
-        title="Pagos" 
-        buttonText="+ Registrar Pago"
+        title="Ingresos" 
+        buttonText="+ Registrar Ingreso"
         onButtonClick={handleOpenModal}
       />
       <Table

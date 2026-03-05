@@ -24,11 +24,12 @@ const Sidebar = () => {
     { path: '/clients', label: 'Clientes', icon: Users },
     { path: '/quotes', label: 'Cotizaciones', icon: FileText },
     { path: '/contracts', label: 'Contratos', icon: FileCheck },
-    { path: '/payments', label: 'Pagos', icon: DollarSign },
-    { path: '/expenses', label: 'Gastos', icon: Receipt },
+    { path: '/payments', label: 'Ingresos', icon: DollarSign },
+    { path: '/expenses', label: 'Egresos', icon: Receipt },
     { path: '/drivers', label: 'Choferes', icon: User },
     { path: '/vehicles', label: 'Vehículos', icon: Truck },
     { path: '/assignments', label: 'Asignaciones', icon: Calendar },
+    { path: '/trips', label: 'Viajes', icon: Calendar },
     { path: '/payment-accounts', label: 'Cuentas de Pago', icon: CreditCard },
   ];
 

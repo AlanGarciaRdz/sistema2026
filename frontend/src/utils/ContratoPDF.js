@@ -137,31 +137,69 @@ function Contrato(doc, info, qr, nombre_contrato) {
   doc.setFillColor(...colors.white);
   doc.setDrawColor(...colors.primary);
   doc.setLineWidth(1.5);
-  doc.roundedRect(15, starty, 550, 110, 8, 8, "FD");
+  doc.roundedRect(15, starty, 550, 125, 8, 8, "FD");
 
   starty += 12;
 
-  // Destino principal
+  // Helper: clickable map icon (opens Google Maps)
+  const drawMapLink = (x, y, mapUrl) => {
+    if (!mapUrl || typeof mapUrl !== 'string' || !/^https?:\/\//i.test(mapUrl)) return;
+    const w = 26;
+    const h = 9;
+    doc.setFillColor(...colors.primary);
+    doc.roundedRect(x, y, w, h, 2, 2, "F");
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "bold");
+    doc.text(x + w / 2, y + 6.5, "Maps", { align: "center" });
+    doc.link(x, y, w, h, { url: mapUrl });
+    doc.setFont("helvetica", "normal");
+  };
+
+  // 1. PUNTO DE SALIDA (Origin - where I start)
+  doc.setFontSize(7);
+  doc.setTextColor(...colors.gray);
+  doc.text(25, starty, "PUNTO DE SALIDA / PICKUP LOCATION");
+  const originMaps = info.origin_maps || info.originMaps;
+  if (originMaps) drawMapLink(518, starty - 2, originMaps);
+  doc.setFontSize(11);
+  doc.setTextColor(...colors.dark);
+  doc.setFont("helvetica", "bold");
+  let splitOrigin = doc.splitTextToSize(info.origin || info.direccionsalida_itinerario || "N/A", 480);
+  doc.text(splitOrigin, 25, starty + 12);
+  doc.setFont("helvetica", "normal");
+
+  // Referencias (landmark for pickup)
+  doc.setFontSize(6);
+  doc.setTextColor(...colors.gray);
+  doc.text(390, starty, "REFERENCIA / LANDMARK");
+  doc.setFontSize(8);
+  doc.setTextColor(...colors.dark);
+  let splitRef = doc.splitTextToSize(info.referencias || info.referencias_itinerario || "N/A", 165);
+  doc.text(splitRef, 390, starty + 7);
+
+  starty += Math.max((splitOrigin.length * 14) + 5, 28);
+
+  // 2. DESTINO (Destination - where I need to go)
   doc.setFontSize(7);
   doc.setTextColor(...colors.gray);
   doc.text(25, starty, "DESTINO / DESTINATION");
+  const destMaps = info.destination_maps || info.destinationMaps;
+  if (destMaps) drawMapLink(518, starty - 2, destMaps);
   doc.setFontSize(11);
   doc.setTextColor(...colors.dark);
   doc.setFont("helvetica", "bold");
   doc.text(25, starty + 12, info.destination || info.destino_itinerario || "N/A");
   doc.setFont("helvetica", "normal");
-  // Grid de información tipo boarding pass
+
+  // 3. Grid de fechas y horas
   starty += 25;
-  
-  // Fila 1: Fechas y horas
   const drawInfoBox = (label, value, x, y, width = 120) => {
     doc.setFillColor(...colors.lightGray);
     doc.roundedRect(x, y, width, 25, 3, 3, "F");
-    
     doc.setFontSize(6);
     doc.setTextColor(...colors.gray);
     doc.text(x + 5, y + 6, label);
-    
     doc.setFontSize(10);
     doc.setTextColor(...colors.dark);
     doc.setFont("helvetica", "bold");
@@ -177,28 +215,9 @@ function Contrato(doc, info, qr, nombre_contrato) {
 
   starty += 35;
 
-  // Dirección de salida
-  doc.setFontSize(6);
-  doc.setTextColor(...colors.gray);
-  doc.text(25, starty, "PUNTO DE SALIDA / PICKUP LOCATION");
-  doc.setFontSize(9);
-  doc.setTextColor(...colors.dark);
-  let splitDireccion = doc.splitTextToSize(info.origin || info.direccionsalida_itinerario || "N/A", 350);
-  doc.text(splitDireccion, 25, starty + 9);
-
-  // Referencias
-  doc.setFontSize(6);
-  doc.setTextColor(...colors.gray);
-  doc.text(390, starty, "REFERENCIA / LANDMARK");
-  doc.setFontSize(8);
-  doc.setTextColor(...colors.dark);
-  let splitRef = doc.splitTextToSize(info.referencias || info.referencias_itinerario || "N/A", 165);
-  doc.text(splitRef, 390, starty + 7);
-
   // ============================================
-  // DETALLES DEL VIAJE
+  // 4. DETALLES DEL VIAJE (Instructions)
   // ============================================
-  starty += 37;
   
   doc.setFillColor(254, 252, 232);
   doc.setDrawColor(234, 179, 8);

@@ -47,6 +47,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const [contactPhone, setContactPhone] = useState('');
     const [origin,       setOrigin]       = useState('');
     const [originMaps,   setOriginMaps]   = useState('');
+    const [referencias,  setReferencias]  = useState('');
     const [destination,  setDestination]  = useState('');
     const [destinationMaps, setDestinationMaps] = useState('');
     const [itineraryText, setItineraryText] = useState('');
@@ -97,6 +98,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
             setContactPhone(editingContract.contactPhone || '');
             setOrigin(editingContract.origin || '');
             setOriginMaps(editingContract.originMaps || '');
+            setReferencias(editingContract.referencias || '');
             setDestination(editingContract.destination || '');
             setDestinationMaps(editingContract.destinationMaps || '');
             setItineraryText(editingContract.itineraryText || '');
@@ -160,6 +162,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         setContactPhone('');
         setOrigin('');
         setOriginMaps('');
+        setReferencias('');
         setDestination('');
         setDestinationMaps('');
         setItineraryText('');
@@ -207,6 +210,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         contactPhone,
         origin,
         originMaps,
+        referencias,
         destination,
         destinationMaps,
         itineraryText,
@@ -235,7 +239,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
         contactName,
         contactPhone,
         origin,
+        originMaps,
+        referencias,
         destination,
+        destinationMaps,
         itineraryText,
         notes,
         unitType,
@@ -384,6 +391,17 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
                 value={destination}
                 onChange={e => setDestination(e.target.value)}
                 required
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Referencia / Landmark (opcional)</label>
+              <input
+                type="text"
+                placeholder="Ej: Entre Coyul y Almendra, por el Mercado de Abastos"
+                value={referencias}
+                onChange={(e) => setReferencias(e.target.value)}
                 className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
               />
             </div>

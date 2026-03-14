@@ -66,7 +66,10 @@ export async function buildPdfInfoFromForm(formState) {
     contactEncargado: formState.selectedClient?.name || 'N/A',
     contactEncargadoTel: formState.selectedClient?.phone || 'N/A',
     origin: formState.origin || '',
+    origin_maps: formState.originMaps || '',
+    referencias: formState.referencias || 'N/A',
     destination: formState.destination || '',
+    destination_maps: formState.destinationMaps || '',
     itineraryText: formState.itineraryText || '',
     notes: formState.notes || '',
     unitType: formState.unitType || '',
@@ -78,8 +81,7 @@ export async function buildPdfInfoFromForm(formState) {
     horaSalida: horaSalida || 'N/A',
     fechaRegreso: formState.returnDate ? new Date(formState.returnDate).toLocaleDateString('es-MX') : 'N/A',
     horaRegreso: formState.returnTime || 'N/A',
-    presentarse: horaSalida || 'N/A',
-    referencias: 'N/A'
+    presentarse: horaSalida || 'N/A'
   };
 }
 
@@ -117,7 +119,9 @@ export async function buildPdfInfoFromRow(row) {
     contactEncargado: row.client_name || 'N/A',
     contactEncargadoTel: notesData.contactPhone || 'N/A',
     origin: row.origin || '',
+    origin_maps: row.origin_maps || '',
     destination: row.destination || '',
+    destination_maps: row.destination_maps || '',
     itineraryText: row.itinerary || '',
     notes: notesData.notes || '',
     unitType: notesData.unitType || '',
@@ -130,7 +134,7 @@ export async function buildPdfInfoFromRow(row) {
     fechaRegreso: endStr ? new Date(endStr).toLocaleDateString('es-MX') : 'N/A',
     horaRegreso: notesData.returnTime || 'N/A',
     presentarse: notesData.departureTime || notesData.serviceTime || 'N/A',
-    referencias: 'N/A'
+    referencias: notesData.referencias || 'N/A'
   };
 }
 

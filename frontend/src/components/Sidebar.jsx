@@ -12,10 +12,12 @@ import {
   Calendar,
   CreditCard,
   Menu,
-  X
+  X,
+  PanelLeftClose,
+  PanelLeft
 } from 'lucide-react';
 
-const Sidebar = () => {
+const Sidebar = ({ isCollapsed = false, onToggleCollapse }) => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -37,6 +39,17 @@ const Sidebar = () => {
 
   return (
     <>
+      {/* Floating button to show sidebar when collapsed (desktop only) */}
+      {isCollapsed && onToggleCollapse && (
+        <button
+          onClick={onToggleCollapse}
+          className="hidden lg:flex fixed top-4 left-4 z-50 p-2 bg-slate-800 text-white rounded-lg shadow-lg hover:bg-slate-700 transition-colors"
+          title="Mostrar menú"
+        >
+          <PanelLeft size={24} />
+        </button>
+      )}
+
       {/* Mobile menu button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
@@ -55,12 +68,30 @@ const Sidebar = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-full bg-slate-800 text-white w-64 transition-transform duration-300 z-40 ${
+        className={`fixed top-0 left-0 h-full bg-slate-800 text-white transition-all duration-300 z-40 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0`}
+        } lg:translate-x-0 ${
+          isCollapsed ? 'lg:w-0 lg:overflow-hidden' : 'w-64'
+        }`}
       >
-        <div className="p-6">
-          <h1 className="text-2xl font-bold mb-8">Sistema RK</h1>
+        <div className="p-6 w-64">
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-2xl font-bold">Sistema RK</h1>
+            {/* Desktop: collapse/expand button */}
+            {onToggleCollapse && (
+              <button
+                onClick={onToggleCollapse}
+                className="hidden lg:flex p-2 rounded-lg text-gray-300 hover:bg-slate-700 hover:text-white transition-colors"
+                title={isCollapsed ? 'Mostrar menú' : 'Ocultar menú'}
+              >
+                {isCollapsed ? (
+                  <PanelLeft size={22} />
+                ) : (
+                  <PanelLeftClose size={22} />
+                )}
+              </button>
+            )}
+          </div>
           <nav>
             <ul className="space-y-2">
               {menuItems.map((item) => {

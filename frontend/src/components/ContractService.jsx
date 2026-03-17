@@ -8,7 +8,7 @@ import { buildPdfInfoFromForm, generateContractPdf } from '../utils/contractPdfU
 const UNIT_TYPES = [
     'Autobus',
     'Sprinter / Crafter',
-    'Van Hiace / Urvan',
+    'Van Hiace / Urvan / Transit',
     'Mini Van',
     'Suburban',
     'Auto 4-6 plazas',

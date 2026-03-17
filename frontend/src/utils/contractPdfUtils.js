@@ -3,6 +3,15 @@ import QRCode from 'qrcode';
 import ContratoPDF from './ContratoPDF';
 import { getPaymentsByContractNumber } from '../services/api';
 
+/** Format YYYY-MM-DD to D/M/YYYY (es-MX) without timezone shift */
+function formatDateOnly(dateStr) {
+  if (!dateStr) return 'N/A';
+  const s = String(dateStr).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const [y, m, d] = s.split('-');
+  return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+}
+
 /**
  * Mapeo ContractService → ContratoPDF (info)
  * ContractService          → ContratoPDF key
@@ -60,7 +69,7 @@ export async function buildPdfInfoFromForm(formState) {
 
   return {
     nombreContrato: formState.folio,
-    fechaContrato: fechaSalida ? new Date(fechaSalida).toLocaleDateString('es-MX') : 'N/A',
+    fechaContrato: formatDateOnly(fechaSalida),
     contactName: formState.contactName || '',
     contactPhone: formState.contactPhone || '',
     contactEncargado: formState.selectedClient?.name || 'N/A',
@@ -77,9 +86,9 @@ export async function buildPdfInfoFromForm(formState) {
     total: totalVal,
     anticipo,
     pendiente,
-    fechaSalida: fechaSalida ? new Date(fechaSalida).toLocaleDateString('es-MX') : 'N/A',
+    fechaSalida: formatDateOnly(fechaSalida),
     horaSalida: horaSalida || 'N/A',
-    fechaRegreso: formState.returnDate ? new Date(formState.returnDate).toLocaleDateString('es-MX') : 'N/A',
+    fechaRegreso: formatDateOnly(formState.returnDate),
     horaRegreso: formState.returnTime || 'N/A',
     presentarse: horaSalida || 'N/A'
   };
@@ -113,7 +122,7 @@ export async function buildPdfInfoFromRow(row) {
 
   return {
     nombreContrato: row.contract_number,
-    fechaContrato: startStr ? new Date(startStr).toLocaleDateString('es-MX') : 'N/A',
+    fechaContrato: formatDateOnly(startStr),
     contactName: notesData.contactName || row.client_name || '',
     contactPhone: notesData.contactPhone || '',
     contactEncargado: row.client_name || 'N/A',
@@ -129,9 +138,9 @@ export async function buildPdfInfoFromRow(row) {
     total: totalVal,
     anticipo,
     pendiente,
-    fechaSalida: startStr ? new Date(startStr).toLocaleDateString('es-MX') : 'N/A',
+    fechaSalida: formatDateOnly(startStr),
     horaSalida: notesData.departureTime || notesData.serviceTime || 'N/A',
-    fechaRegreso: endStr ? new Date(endStr).toLocaleDateString('es-MX') : 'N/A',
+    fechaRegreso: formatDateOnly(endStr),
     horaRegreso: notesData.returnTime || 'N/A',
     presentarse: notesData.departureTime || notesData.serviceTime || 'N/A',
     referencias: notesData.referencias || 'N/A'

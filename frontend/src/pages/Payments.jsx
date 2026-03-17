@@ -21,6 +21,7 @@ const Payments = () => {
   const [contracts, setContracts] = useState([]);
   const [accounts, setAccounts] = useState([]);
   
+  const [sourceSearch, setSourceSearch] = useState('');
   const [formData, setFormData] = useState({
     sourceType: 'quote', // 'quote' or 'contract'
     sourceId: '',
@@ -92,6 +93,7 @@ const Payments = () => {
 
   const handleOpenModal = () => {
     setEditingPayment(null);
+    setSourceSearch('');
     setFormData({
       sourceType: 'quote',
       sourceId: '',
@@ -365,16 +367,24 @@ const Payments = () => {
   ];
 
   const getSourceOptions = () => {
+    const search = (sourceSearch || '').toLowerCase().trim();
+    const filterBySearch = (item, label) =>
+      !search || label.toLowerCase().includes(search) || String(item.value).includes(search);
+
     if (formData.sourceType === 'quote') {
-      return quotes.map(quote => ({
-        value: quote.id,
-        label: `#${quote.id} - ${quote.client_name} (${formatCurrency(quote.total_amount)})`
-      }));
+      return quotes
+        .map(quote => ({
+          value: quote.id,
+          label: `#${quote.id} - ${quote.client_name || 'Sin cliente'} (${formatCurrency(quote.total_amount)})`
+        }))
+        .filter(opt => filterBySearch(opt, opt.label));
     } else {
-      return contracts.map(contract => ({
-        value: contract.id,
-        label: `${contract.contract_number} - ${contract.client_name} (${formatCurrency(contract.total_amount)})`
-      }));
+      return contracts
+        .map(contract => ({
+          value: contract.id,
+          label: `${contract.contract_number || ''} - ${contract.client_name || 'Sin cliente'} (${formatCurrency(contract.total_amount)})`
+        }))
+        .filter(opt => filterBySearch(opt, opt.label));
     }
   };
 
@@ -416,7 +426,10 @@ const Payments = () => {
                   type="radio"
                   value="quote"
                   checked={formData.sourceType === 'quote'}
-                  onChange={(e) => setFormData({ ...formData, sourceType: e.target.value, sourceId: '' })}
+                  onChange={(e) => {
+                    setSourceSearch('');
+                    setFormData({ ...formData, sourceType: e.target.value, sourceId: '' });
+                  }}
                   className="mr-2"
                 />
                 Cotización
@@ -426,7 +439,10 @@ const Payments = () => {
                   type="radio"
                   value="contract"
                   checked={formData.sourceType === 'contract'}
-                  onChange={(e) => setFormData({ ...formData, sourceType: e.target.value, sourceId: '' })}
+                  onChange={(e) => {
+                    setSourceSearch('');
+                    setFormData({ ...formData, sourceType: e.target.value, sourceId: '' });
+                  }}
                   className="mr-2"
                 />
                 Contrato
@@ -434,14 +450,37 @@ const Payments = () => {
             </div>
           </div>
 
+          {/* Search / Lookup */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Buscar {formData.sourceType === 'quote' ? 'cotización' : 'contrato'}
+            </label>
+            <input
+              type="text"
+              placeholder={formData.sourceType === 'quote'
+                ? 'Escribe #, número o nombre del cliente...'
+                : 'Escribe número de contrato o nombre del cliente...'}
+              value={sourceSearch}
+              onChange={(e) => setSourceSearch(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
           {/* Source Selection */}
-          <FormSelect
-            label={formData.sourceType === 'quote' ? 'Seleccionar Cotización' : 'Seleccionar Contrato'}
-            value={formData.sourceId}
-            onChange={(e) => setFormData({ ...formData, sourceId: e.target.value })}
-            options={getSourceOptions()}
-            required
-          />
+          <div>
+            <FormSelect
+              label={formData.sourceType === 'quote' ? 'Seleccionar Cotización' : 'Seleccionar Contrato'}
+              value={formData.sourceId}
+              onChange={(e) => setFormData({ ...formData, sourceId: e.target.value })}
+              options={getSourceOptions()}
+              required
+            />
+            {sourceSearch && getSourceOptions().length === 0 && (
+              <p className="mt-1 text-sm text-amber-600">
+                No se encontraron {formData.sourceType === 'quote' ? 'cotizaciones' : 'contratos'}. Intenta con otro término.
+              </p>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             {/* Payment Type */}

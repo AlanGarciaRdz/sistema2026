@@ -7,6 +7,25 @@ const formatCurrency = (amount) =>
 
 const formatDate = (date) => (date ? new Date(date).toLocaleDateString('es-MX') : '-');
 
+/** Format YYYY-MM-DD as "14 de marzo de 2026" (sin cambio de zona horaria) */
+const formatDateLong = (dateStr) => {
+  if (!dateStr) return '-';
+  const s = String(dateStr).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const [y, m, d] = s.split('-').map(Number);
+  return `${d} de ${meses[m - 1]} de ${y}`;
+};
+
+/** Format YYYY-MM-DD as "14/03/2026" (sin cambio de zona horaria) */
+const formatDateShort = (dateStr) => {
+  if (!dateStr) return '-';
+  const s = String(dateStr).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const [y, m, d] = s.split('-');
+  return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+};
+
 const TripSummaryModal = ({ isOpen, onClose, row }) => {
   const [anticipo, setAnticipo] = useState(0);
   const [textoCliente, setTextoCliente] = useState('');
@@ -50,42 +69,68 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
 
   useEffect(() => {
     if (!row) return;
-    const fecha = formatDate(row.start_date);
+    const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
+    const endStr = row.end_date ? String(row.end_date).slice(0, 10) : startStr;
+    const fechaLong = formatDateLong(row.start_date);
     const ruta = `${row.origin || '-'} → ${row.destination || '-'}`;
     const cliente = row.client_name || notesData.contactName || '-';
     const detalles = [itinerary, uiNotes].filter(Boolean).join('\n') || 'Sin detalles';
+    const pasajeros = row.passenger_count ?? '-';
+
+    // Mapa invertido: destination_maps = origen real, origin_maps = destino real
+    const mapaOrigen = destinationMaps || '';
+    const mapaDestino = originMaps || '';
 
     setTextoCliente(
-      `*Resumen del servicio - Contrato #${row.contract_number}*\n\n` +
-        `Cliente: ${cliente}\n` +
-        `Fecha: ${fecha}${horaSalida ? ` · ${horaSalida}` : ''}\n` +
-        `Ruta: ${ruta}\n` +
-        (originMaps ? `Origen: ${originMaps}\n` : '') +
-        (destinationMaps ? `Destino: ${destinationMaps}\n` : '') +
-        `Unidad: ${unitType}${assignedUnit !== '-' ? ` (${assignedUnit})` : ''}\n` +
-        `Total: ${formatCurrency(total)} · Apartado: ${formatCurrency(anticipo)}\n` +
-        (detalles !== 'Sin detalles' ? `\nDetalles:\n${detalles}` : '') +
-        `\n\nPor favor confirma que la información es correcta.`
+      `*Confirmación de Servicio de Transporte*\n\n` +
+        `Folio: #${row.contract_number}\n` +
+        `📅 Fecha: ${fechaLong}${horaSalida ? ` · ${horaSalida}` : ''}\n\n` +
+        `👤 Cliente: ${cliente}\n` +
+        `📞 Tel: ${clientPhone}\n\n` +
+        `📍 Origen:\n${row.origin || '-'}${mapaOrigen ? `\n${mapaOrigen}` : ''}\n\n` +
+        `📍 Destino:\n${row.destination || '-'}${mapaDestino ? `\n${mapaDestino}` : ''}\n\n` +
+        `🕒 Horario\n` +
+        `Salida: ${formatDateShort(startStr)}${horaSalida ? ` – ${horaSalida}` : ''}\n` +
+        `Regreso: ${formatDateShort(endStr)}${horaRegreso ? ` – ${horaRegreso}` : ''}\n\n` +
+        (pasajeros !== '-' ? `👥 Pasajeros: ${pasajeros} personas\n` : '') +
+        (detalles !== 'Sin detalles' ? `🎉 Evento: ${detalles}\n\n` : '') +
+        `💰 Total: ${formatCurrency(total)}\n` +
+        `💵 Anticipo: ${formatCurrency(anticipo)}\n` +
+        `⚠️ Pendiente: ${formatCurrency(total - anticipo)}\n\n` +
+        `Por favor confirma que la información es correcta.`
     );
 
-    const fechaRegreso = formatDate(row.end_date || row.start_date);
-    const salidaStr = horaSalida ? `Salida: ${fecha} ${horaSalida}` : null;
-    const regresoStr = horaRegreso ? `Regreso: ${fechaRegreso} ${horaRegreso}` : null;
+    const salidaStr = horaSalida ? `Salida: ${formatDateShort(startStr)} – ${horaSalida}` : null;
+    const regresoStr = horaRegreso ? `Regreso: ${formatDateShort(endStr)} – ${horaRegreso}` : null;
 
     const lineasChofer = [
-      `#${row.contract_number} · ${fecha}`,
-      `Cliente: ${cliente}`,
-      `Tel: ${clientPhone}`,
-      ruta,
-      assignedUnit !== '-' ? `Unidad: ${assignedUnit}` : null,
+      'Confirmación de Servicio de Transporte',
+      '',
+      `Folio: #${row.contract_number}`,
+      `📅 Fecha: ${fechaLong}`,
+      '',
+      `👤 Cliente: ${cliente}`,
+      `📞 Tel: ${clientPhone}`,
+      '',
+      '📍 Origen:',
+      row.origin || '-',
+      mapaOrigen || null,
+      '',
+      '📍 Destino:',
+      row.destination || '-',
+      mapaDestino || null,
+      '',
+      '🕒 Horario',
       salidaStr,
       regresoStr,
-      originMaps ? `Origen: ${originMaps}` : null,
-      destinationMaps ? `Destino: ${destinationMaps}` : null,
-      `Total: ${formatCurrency(total)}`,
-      `Anticipo: ${formatCurrency(anticipo)}`,
-      `Pendiente: ${formatCurrency(total - anticipo)}`
-    ].filter(Boolean);
+      '',
+      pasajeros !== '-' ? `👥 Pasajeros: ${pasajeros} personas` : null,
+      detalles !== 'Sin detalles' ? `🎉 Evento: ${detalles}` : null,
+      '',
+      `💰 Total: ${formatCurrency(total)}`,
+      `💵 Anticipo: ${formatCurrency(anticipo)}`,
+      `⚠️ Pendiente: ${formatCurrency(total - anticipo)}`
+    ].filter((x) => x !== null && x !== undefined);
     setTextoChofer(lineasChofer.join('\n'));
   }, [row, anticipo]);
 
@@ -120,7 +165,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
           </div>
           {originMaps && (
             <div className="col-span-2">
-              <span className="text-gray-500">Ubicación origen</span>
+              <span className="text-gray-500">Ubicación origen (punto de salida)</span>
               <a href={originMaps} target="_blank" rel="noopener noreferrer" className="block text-blue-600 truncate hover:underline">
                 {originMaps}
               </a>
@@ -128,7 +173,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
           )}
           {destinationMaps && (
             <div className="col-span-2">
-              <span className="text-gray-500">Ubicación destino</span>
+              <span className="text-gray-500">Ubicación destino (punto de llegada)</span>
               <a href={destinationMaps} target="_blank" rel="noopener noreferrer" className="block text-blue-600 truncate hover:underline">
                 {destinationMaps}
               </a>
@@ -167,7 +212,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
             <textarea
               readOnly
               value={textoCliente}
-              rows={6}
+              rows={14}
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono bg-gray-50"
             />
             <button
@@ -186,7 +231,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
             <textarea
               readOnly
               value={textoChofer}
-              rows={8}
+              rows={14}
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono bg-gray-50"
             />
             <button

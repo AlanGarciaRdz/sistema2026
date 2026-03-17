@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { getClients, createClient, updateClient, deleteClient } from '../services/api';
-import Header from '../components/Header';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import FormInput from '../components/FormInput';

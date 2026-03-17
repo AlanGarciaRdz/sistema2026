@@ -75,7 +75,7 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, editingQuote]);
 
   // Separate useEffect to load editing quote data AFTER clients are loaded
   useEffect(() => {
@@ -84,7 +84,7 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
       setSelectedClientId(editingQuote.client_id ? String(editingQuote.client_id) : '');
       setClientType(editingQuote.client_id ? 'existing' : 'new');
       setDays(editingQuote.days || [{ date: '', destinations: ['', ''] }]);
-      setCosts(editingQuote.costs || costs);
+      setCosts((prev) => editingQuote.costs || prev);
       setDistances(editingQuote.distances || { totalKm: 0, calculating: false });
       setManualAdjustments(editingQuote.manualAdjustments || { adjustedDistance: 0, extraMovements: 0 });
       setDaysNights(editingQuote.daysNights || { days: 0, nights: 0 });
@@ -181,9 +181,8 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     try {
       // TODO: Replace with actual Google Maps Distance Matrix API call
       // For now, using placeholder calculation
-      const GOOGLE_MAPS_API_KEY = 'YOUR_API_KEY_HERE';
-
-      // Simulated API call (replace with actual implementation)
+      // const GOOGLE_MAPS_API_KEY = 'YOUR_API_KEY_HERE';
+      // Simulated API call (replace with actual implementation):
       // const response = await fetch(`https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(allDestinations[0])}&destinations=${encodeURIComponent(allDestinations[allDestinations.length - 1])}&key=${GOOGLE_MAPS_API_KEY}`);
 
       // Placeholder: 100km per segment

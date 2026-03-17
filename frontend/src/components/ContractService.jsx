@@ -267,6 +267,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
   
 
     return (
+        <>
         <Modal isOpen={isOpen} onClose={handleClose}>
 
         {/* HEADER */}
@@ -648,7 +649,10 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
 
         </form>
       </Modal>
+      {loading && <Loading />}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </>
     );
-};
+}
 
 export default ContractService;

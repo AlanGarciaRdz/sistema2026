@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Fragment } from 'react';
-import { getQuotes, getClients, deleteQuote, createQuote, updateQuote, createContract } from '../services/api';
+import { getQuotes, deleteQuote, createQuote, updateQuote, createContract } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
@@ -107,8 +107,7 @@ const Quotes = () => {
 
     try {
       const contractNumber = generateContractNumber();
-      const quoteData = parseQuoteData(viewingQuote.notes);
-      
+
       const contractData = {
         contract_number: contractNumber,
         client_id: viewingQuote.client_id,

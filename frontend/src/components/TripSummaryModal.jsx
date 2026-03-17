@@ -72,7 +72,6 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
     const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
     const endStr = row.end_date ? String(row.end_date).slice(0, 10) : startStr;
     const fechaLong = formatDateLong(row.start_date);
-    const ruta = `${row.origin || '-'} → ${row.destination || '-'}`;
     const cliente = row.client_name || notesData.contactName || '-';
     const detalles = [itinerary, uiNotes].filter(Boolean).join('\n') || 'Sin detalles';
     const pasajeros = row.passenger_count ?? '-';
@@ -132,6 +131,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
       `⚠️ Pendiente: ${formatCurrency(total - anticipo)}`
     ].filter((x) => x !== null && x !== undefined);
     setTextoChofer(lineasChofer.join('\n'));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- row/anticipo are the intentional triggers
   }, [row, anticipo]);
 
   const handleCopy = (text, label) => {

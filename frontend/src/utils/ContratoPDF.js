@@ -1,6 +1,5 @@
 // import { MoneyFormatter } from '../utils/helpers';
 import rklogo from "../images/rklogo";
-import conversor from "conversor-numero-a-letras-es-ar";
 
 function Contrato(doc, info, qr, nombre_contrato) {
   console.log(info);
@@ -313,9 +312,6 @@ function Contrato(doc, info, qr, nombre_contrato) {
   doc.setFont("helvetica", "bold");
   doc.text(300, pagoStartY, "PAGOS / PAYMENT");
   doc.setFont("helvetica", "normal");
-
-  let ClaseConversor = conversor.conversorNumerosALetras;
-  let miConversor = new ClaseConversor();
 
   pagoStartY += 13;
   

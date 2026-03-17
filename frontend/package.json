@@ -1,6 +1,7 @@
 {
   "name": "frontend",
   "version": "0.1.0",
+  "homepage": "/sistema",
   "private": true,
   "dependencies": {
     "@testing-library/dom": "^10.4.1",
@@ -24,7 +25,8 @@
     "build": "npm run lint && react-scripts build",
     "lint": "eslint src/ --max-warnings 0",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "deploy": "npm run build && rsync -avz  ./build/* rk:/usr/share/nginx/html/sistema"
   },
   "eslintConfig": {
     "extends": [

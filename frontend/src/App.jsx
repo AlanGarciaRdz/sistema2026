@@ -17,7 +17,7 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   return (
-    <Router>
+    <Router basename="/sistema">
       <div className="flex min-h-screen bg-gray-100">
         <Sidebar
           isCollapsed={isSidebarCollapsed}

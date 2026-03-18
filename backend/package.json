@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "deploy:db": "rsync -avz ./db/transportation_db.dump rk:/opt/servicios/sistema/db/",
+    "deploy:backend": "rsync -avz --exclude='db' --exclude='node_modules' --exclude='.env' ./ rk:/opt/servicios/sistema"
   },
   "dependencies": {
     "axios": "^1.13.4",

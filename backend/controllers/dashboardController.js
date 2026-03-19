@@ -23,6 +23,34 @@ const getDashboardData = async (req, res) => {
       WHERE EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
         AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
     `);
+
+    // Get total expenses for current month
+    const expensesResult = await pool.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM expenses
+      WHERE EXTRACT(MONTH FROM expense_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+    `);
+
+    // Get accounts with balance (payments - expenses) grouped by business_unit
+    const accountsResult = await pool.query(`
+      SELECT pa.id, pa.account_name, pa.bank_name,
+        COALESCE(pa.business_unit, 'Sin unidad') as business_unit,
+        COALESCE(p.total, 0)::numeric - COALESCE(e.total, 0)::numeric as balance
+      FROM payment_accounts pa
+      LEFT JOIN (
+        SELECT payment_account_id, SUM(amount) as total
+        FROM payments
+        GROUP BY payment_account_id
+      ) p ON pa.id = p.payment_account_id
+      LEFT JOIN (
+        SELECT payment_account_id, SUM(amount) as total
+        FROM expenses
+        GROUP BY payment_account_id
+      ) e ON pa.id = e.payment_account_id
+      WHERE pa.status = 'Active' OR pa.status IS NULL
+      ORDER BY pa.business_unit, pa.account_name
+    `);
     
     // Get 5 most recent contracts
     const recentContractsResult = await pool.query(`
@@ -48,13 +76,33 @@ const getDashboardData = async (req, res) => {
       LIMIT 5
     `);
     
+    // Group accounts by business_unit
+    const accountsByUnit = {};
+    for (const row of accountsResult.rows) {
+      const unit = row.business_unit || 'Sin unidad';
+      if (!accountsByUnit[unit]) {
+        accountsByUnit[unit] = { businessUnit: unit, accounts: [], totalBalance: 0 };
+      }
+      const balance = parseFloat(row.balance) || 0;
+      accountsByUnit[unit].accounts.push({
+        id: row.id,
+        account_name: row.account_name,
+        bank_name: row.bank_name,
+        balance
+      });
+      accountsByUnit[unit].totalBalance += balance;
+    }
+    const accountsByBusinessUnit = Object.values(accountsByUnit);
+
     const dashboardData = {
       metrics: {
         totalClients: parseInt(clientsResult.rows[0].total),
         activeContracts: parseInt(activeContractsResult.rows[0].total),
         pendingQuotes: parseInt(pendingQuotesResult.rows[0].total),
-        currentMonthRevenue: parseFloat(revenueResult.rows[0].total)
+        currentMonthRevenue: parseFloat(revenueResult.rows[0].total),
+        currentMonthExpenses: parseFloat(expensesResult.rows[0].total)
       },
+      accountsByBusinessUnit,
       recentContracts: recentContractsResult.rows,
       upcomingAssignments: upcomingAssignmentsResult.rows
     };

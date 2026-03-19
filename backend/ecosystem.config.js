@@ -6,7 +6,7 @@ module.exports = {
         instances: 1,
         autorestart: true,
         port: 5000,
-        watch: false,
+        watch: true,
         max_memory_restart: '100M',
         env: {
             NODE_ENV: 'development'

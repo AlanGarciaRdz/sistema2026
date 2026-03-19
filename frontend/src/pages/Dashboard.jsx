@@ -3,7 +3,7 @@ import { getDashboardData } from '../services/api';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Users, FileCheck, FileText, DollarSign } from 'lucide-react';
+import { Users, FileCheck, FileText, DollarSign, Receipt, CreditCard } from 'lucide-react';
 
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
@@ -18,6 +18,7 @@ const Dashboard = () => {
     try {
       setLoading(true);
       const response = await getDashboardData();
+      console.log(response.data.data);
       setData(response.data.data);
     } catch (error) {
       setToast({
@@ -34,6 +35,7 @@ const Dashboard = () => {
   const metrics = data?.metrics || {};
   const recentContracts = data?.recentContracts || [];
   const upcomingAssignments = data?.upcomingAssignments || [];
+  const accountsByBusinessUnit = data?.accountsByBusinessUnit || [];
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('es-MX', {
@@ -52,7 +54,7 @@ const Dashboard = () => {
       <Header title="Dashboard" />
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -100,7 +102,52 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 mb-1">Egresos del Mes</p>
+              <p className="text-2xl font-bold text-gray-900">{formatCurrency(metrics.currentMonthExpenses)}</p>
+            </div>
+            <div className="bg-red-100 p-3 rounded-lg">
+              <Receipt className="text-red-600" size={24} />
+            </div>
+          </div>
+        </div>
       </div>
+      {accountsByBusinessUnit.length}
+      {/* Cuentas por Unidad de Negocio */}
+      {accountsByBusinessUnit.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Cuentas por Unidad de Negocio</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {accountsByBusinessUnit.map((unit) => (
+              <div key={unit.businessUnit} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                    <CreditCard size={20} className="text-gray-600" />
+                    {unit.businessUnit}
+                  </h3>
+                  <span className="text-lg font-bold text-gray-900">{formatCurrency(unit.totalBalance)}</span>
+                </div>
+                <div className="p-4 divide-y divide-gray-100">
+                  {unit.accounts.map((acc) => (
+                    <div key={acc.id} className="py-2 flex justify-between items-center">
+                      <div>
+                        <p className="font-medium text-gray-900">{acc.account_name}</p>
+                        <p className="text-xs text-gray-500">{acc.bank_name || '-'}</p>
+                      </div>
+                      <span className={`font-semibold ${acc.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(acc.balance)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Contracts */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">

@@ -1,15 +1,48 @@
-import React from 'react';
-import { Edit, Trash2, Eye } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Edit, Trash2, Eye, ChevronUp, ChevronDown } from 'lucide-react';
 
-const Table = ({ columns, data, onView, onEdit, onDelete, customActions }) => {
+const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortable }) => {
   const hasActions = onView || onEdit || onDelete || customActions;
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDirection, setSortDirection] = useState('asc');
+
+  const sortedData = useMemo(() => {
+    if (!sortable || !sortKey || !data?.length) return data || [];
+    const accessor = sortKey;
+    return [...data].sort((a, b) => {
+      let va = a[accessor];
+      let vb = b[accessor];
+      if (va == null) va = '';
+      if (vb == null) vb = '';
+      if (typeof va === 'number' && typeof vb === 'number') {
+        return sortDirection === 'asc' ? va - vb : vb - va;
+      }
+      const sa = String(va).toLowerCase();
+      const sb = String(vb).toLowerCase();
+      const cmp = sa.localeCompare(sb);
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDirection, sortable]);
+
+  const handleSort = (column) => {
+    const key = column.sortAccessor || column.accessor;
+    if (!key) return;
+    if (sortKey === key) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDirection('asc');
+    }
+  };
+
+  const displayData = sortable ? sortedData : (data || []);
 
   return (
     <>
       {/* Vista móvil: tarjetas */}
       <div className="block sm:hidden space-y-2">
-        {data && data.length > 0 ? (
-          data.map((row, rowIndex) => (
+        {displayData && displayData.length > 0 ? (
+          displayData.map((row, rowIndex) => (
             <div key={rowIndex} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="p-4">
                 {columns.map((column, colIndex) => {
@@ -61,15 +94,28 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions }) => {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {columns.map((column, index) => (
-                <th
-                  style={column.width ? { width: column.width } : column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
-                  key={index}
-                  className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
-                >
-                  {column.header}
-                </th>
-              ))}
+              {columns.map((column, index) => {
+                const key = column.sortAccessor || column.accessor;
+                const canSort = sortable && key;
+                const isActive = sortKey === key;
+                return (
+                  <th
+                    style={column.width ? { width: column.width } : column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
+                    key={index}
+                    onClick={() => canSort && handleSort(column)}
+                    className={`px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${
+                      canSort ? 'cursor-pointer select-none hover:bg-gray-100 transition-colors' : ''
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {column.header}
+                      {canSort && isActive && (
+                        sortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                      )}
+                    </span>
+                  </th>
+                );
+              })}
               {hasActions && (
                 <th className="px-4 sm:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                   Acciones
@@ -78,8 +124,8 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions }) => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {data && data.length > 0 ? (
-              data.map((row, rowIndex) => (
+            {displayData && displayData.length > 0 ? (
+              displayData.map((row, rowIndex) => (
                 <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
                   {columns.map((column, colIndex) => (
                     <td

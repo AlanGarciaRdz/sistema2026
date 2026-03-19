@@ -69,6 +69,14 @@ export const createVehicle = (data) => api.post('/vehicles', data);
 export const updateVehicle = (id, data) => api.put(`/vehicles/${id}`, data);
 export const deleteVehicle = (id) => api.delete(`/vehicles/${id}`);
 
+// Maintenance
+export const getMaintenance = () => api.get('/maintenance');
+export const getMaintenanceById = (id) => api.get(`/maintenance/${id}`);
+export const createMaintenance = (data) => api.post('/maintenance', data);
+export const updateMaintenance = (id, data) => api.put(`/maintenance/${id}`, data);
+export const deleteMaintenance = (id) => api.delete(`/maintenance/${id}`);
+export const syncMaintenanceExpenses = () => api.post('/maintenance/sync-expenses');
+
 // Assignments
 export const getAssignments = () => api.get('/assignments');
 export const getAssignmentById = (id) => api.get(`/assignments/${id}`);

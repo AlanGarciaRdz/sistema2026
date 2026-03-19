@@ -12,6 +12,7 @@ import Vehicles from './pages/Vehicles';
 import Assignments from './pages/Assignments';
 import PaymentAccounts from './pages/PaymentAccounts';
 import Trips from './pages/Trips';
+import Maintenance from './pages/Maintenance';
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -41,6 +42,7 @@ function App() {
               <Route path="/assignments" element={<Assignments />} />
               <Route path="/trips" element={<Trips />} />
               <Route path="/payment-accounts" element={<PaymentAccounts />} />
+              <Route path="/maintenance" element={<Maintenance />} />
             </Routes>
           </div>
         </main>

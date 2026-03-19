@@ -5,10 +5,12 @@ const {
   getMaintenanceById,
   createMaintenance,
   updateMaintenance,
-  deleteMaintenance
+  deleteMaintenance,
+  syncMaintenanceExpenses
 } = require('../controllers/maintenanceController');
 
 router.get('/', getAllMaintenance);
+router.post('/sync-expenses', syncMaintenanceExpenses);
 router.get('/:id', getMaintenanceById);
 router.post('/', createMaintenance);
 router.put('/:id', updateMaintenance);

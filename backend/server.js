@@ -21,6 +21,7 @@ const driversRoutes = require('./routes/drivers');
 const vehiclesRoutes = require('./routes/vehicles');
 const assignmentsRoutes = require('./routes/assignments');
 const dashboardRoutes = require('./routes/dashboard');
+const maintenanceRoutes = require('./routes/maintenance');
 
 // Use routes
 app.use('/api/clients', clientsRoutes);
@@ -33,6 +34,7 @@ app.use('/api/drivers', driversRoutes);
 app.use('/api/vehicles', vehiclesRoutes);
 app.use('/api/assignments', assignmentsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getClients, createClient, updateClient, deleteClient } from '../services/api';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
@@ -14,6 +14,7 @@ const Clients = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [toast, setToast] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     contact_person: '',
@@ -96,6 +97,19 @@ const Clients = () => {
     resetForm();
   };
 
+  const filteredClients = useMemo(() => {
+    if (!searchTerm.trim()) return clients;
+    const q = searchTerm.toLowerCase().trim();
+    return clients.filter(
+      (c) =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.contact_person || '').toLowerCase().includes(q) ||
+        (c.phone || '').includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.address || '').toLowerCase().includes(q)
+    );
+  }, [clients, searchTerm]);
+
   const columns = [
     { header: 'Nombre', accessor: 'name' },
     { header: 'Persona de Contacto', accessor: 'contact_person' },
@@ -106,16 +120,31 @@ const Clients = () => {
   if (loading) return <Loading />;
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 min-w-0 overflow-x-hidden">
+    <div className="p-6">
       
       <Header title="Clientes" 
         buttonText="+ Nuevo Cliente"
         onButtonClick={() => setIsModalOpen(true)}
       />
 
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Buscar por nombre, contacto, teléfono o email..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {searchTerm && (
+          <p className="mt-2 text-sm text-gray-600">
+            Mostrando {filteredClients.length} de {clients.length} clientes
+          </p>
+        )}
+      </div>
+
       <Table
         columns={columns}
-        data={clients}
+        data={filteredClients}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />

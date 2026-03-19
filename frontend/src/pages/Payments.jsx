@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getPayments, deletePayment, createPayment, updatePayment, getQuotes, getContracts, getPaymentAccounts } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
@@ -22,6 +22,7 @@ const Payments = () => {
   const [accounts, setAccounts] = useState([]);
   
   const [sourceSearch, setSourceSearch] = useState('');
+  const [tableSearch, setTableSearch] = useState('');
   const [formData, setFormData] = useState({
     sourceType: 'quote', // 'quote' or 'contract'
     sourceId: '',
@@ -344,18 +345,65 @@ const Payments = () => {
     return new Date(date).toLocaleDateString('es-MX');
   };
 
+  const filteredPayments = useMemo(() => {
+    if (!tableSearch.trim()) return payments;
+    const q = tableSearch.toLowerCase().trim();
+    return payments.filter((p) => {
+      try {
+        const notesData = JSON.parse(p.notes || '{}');
+        if (notesData.quote_id) {
+          const quote = quotes.find(qu => qu.id === parseInt(notesData.quote_id));
+          if (quote) {
+            return (
+              String(notesData.quote_id).includes(q) ||
+              (quote.client_name || '').toLowerCase().includes(q) ||
+              (quote.quote_number || '').toLowerCase().includes(q)
+            );
+          }
+        }
+      } catch {}
+      const contract = contracts.find(c => c.id === p.contract_id);
+      const contractNum = p.contract_number || contract?.contract_number || '';
+      const clientName = contract?.client_name || p.client_name || '';
+      return (
+        contractNum.toLowerCase().includes(q) ||
+        contractNum.includes(q) ||
+        clientName.toLowerCase().includes(q)
+      );
+    });
+  }, [payments, tableSearch, quotes, contracts]);
+
   const columns = [
     { 
-      header: 'Origen', 
+      header: 'Contrato', 
       render: (row) => {
         try {
           const notesData = JSON.parse(row.notes || '{}');
           if (notesData.quote_id) {
             const quote = quotes.find(q => q.id === parseInt(notesData.quote_id));
-            return `Cotización #${notesData.quote_id}${quote ? ` - ${quote.client_name}` : ''}`;
+            const label = `Cotización #${notesData.quote_id}`;
+            const client = quote?.client_name || '-';
+            const date = quote?.start_date ? formatDate(quote.start_date) : '-';
+            return (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-medium">{label}</span>
+                <span className="text-xs text-gray-500">{client}</span>
+                <span className="text-xs text-gray-500">{date}</span>
+              </div>
+            );
           }
         } catch {}
-        return row.contract_number ? `Contrato ${row.contract_number}` : 'N/A';
+        const contract = contracts.find(c => c.id === row.contract_id);
+        const label = row.contract_number ? `Contrato ${row.contract_number}` : (contract?.contract_number ? `Contrato ${contract.contract_number}` : 'N/A');
+        const client = contract?.client_name || row.client_name || '-';
+        const date = (contract?.start_date || row.start_date) ? formatDate(contract?.start_date || row.start_date) : '-';
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="font-medium">{label}</span>
+            <span className="text-xs text-gray-500">{client}</span>
+            <span className="text-xs text-gray-500">{date}</span>
+          </div>
+        );
       }
     },
     { header: 'Tipo', accessor: 'payment_type' },
@@ -397,9 +445,25 @@ const Payments = () => {
         buttonText="+ Registrar Ingreso"
         onButtonClick={handleOpenModal}
       />
+
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Buscar por número de contrato o nombre del cliente..."
+          value={tableSearch}
+          onChange={(e) => setTableSearch(e.target.value)}
+          className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Mostrando {filteredPayments.length} de {payments.length} pagos
+          </p>
+        )}
+      </div>
+
       <Table
         columns={columns}
-        data={payments}
+        data={filteredPayments}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />

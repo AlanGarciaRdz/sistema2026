@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ContractService from '../components/ContractService';
-import { getContracts, deleteContract, createContract, updateContract } from '../services/api';
+import { getContracts, deleteContract, createContract, updateContract, getPayments } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Loading from '../components/Loading';
@@ -21,6 +21,7 @@ const generateContractNumber = () => {
 
 const Contracts = () => {
   const [contracts, setContracts] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isContratoServicioOpen, setIsContratoServicioOpen] = useState(false);
@@ -36,7 +37,17 @@ const Contracts = () => {
 
   useEffect(() => {
     fetchContracts();
+    fetchPayments();
   }, []);
+
+  const fetchPayments = async () => {
+    try {
+      const response = await getPayments();
+      setPayments(response.data.data || []);
+    } catch (err) {
+      console.error('Error fetching payments:', err);
+    }
+  };
 
   const fetchContracts = async () => {
     try {
@@ -267,6 +278,12 @@ const Contracts = () => {
     });
   }, [contracts, filterFechaInicio, filterFechaFin, filterCliente, filterNoContrato, filterEstado, filterDestino]);
 
+  const getPaidAmount = (contractId) => {
+    return (payments || [])
+      .filter((p) => p.contract_id != null && p.contract_id == contractId)
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  };
+
   const getAssignedUnit = (row) => {
     if (row.vehicle_name) return row.vehicle_name;
     try {
@@ -297,7 +314,27 @@ const Contracts = () => {
     { header: 'Destino', accessor: 'destination', maxWidth: '120px', wrap: true },
     { header: 'Fecha Inicio', render: (row) => formatDate(row.start_date), width: '95px' },
     { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
-    { header: 'Monto Total', render: (row) => formatCurrency(row.total_amount), width: '100px' },
+    {
+      header: 'Monto Total',
+      width: '120px',
+      render: (row) => {
+        const total = parseFloat(row.total_amount) || 0;
+        const paid = getPaidAmount(row.id);
+        const remaining = total - paid;
+        const hasPayments = paid > 0;
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="font-medium">{formatCurrency(total)}</span>
+            {hasPayments && (
+              <>
+                <span className="text-xs text-green-600">Abonado: {formatCurrency(paid)}</span>
+                <span className="text-xs text-amber-600">Falta: {formatCurrency(remaining)}</span>
+              </>
+            )}
+          </div>
+        );
+      }
+    },
     {
       header: 'Estado',
       width: '100px',

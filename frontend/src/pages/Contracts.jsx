@@ -52,7 +52,6 @@ const Contracts = () => {
 
   const handleSaveContract = async (payload) => {
     try {
-      // Map ContractService payload -> backend contracts schema
       const statusMap = {
         scheduled: 'Agendado',
         in_progress: 'En proceso',
@@ -80,7 +79,6 @@ const Contracts = () => {
         num_units: 1,
         event_type: payload.mode === 'contrato' ? 'Contrato' : 'Servicio',
         vehicle_name: payload.vehicle?.license_plate || payload.vehicle?.plate || payload.vehicle?.vehicle_code || null,
-        // Keep extra UI fields in notes for later (optional)
         notes: JSON.stringify({
           mode: payload.mode,
           contactName: payload.contactName || '',
@@ -118,7 +116,6 @@ const Contracts = () => {
       notesData = row.notes ? JSON.parse(row.notes) : {};
     } catch {}
 
-    // Map backend row -> ContractService expected shape
     const statusReverseMap = {
       Agendado: 'scheduled',
       'En proceso': 'in_progress',
@@ -145,7 +142,7 @@ const Contracts = () => {
       itineraryText: row.itinerary || '',
       unitType: notesData.unitType || '',
       total: row.total_amount ?? '',
-      notes:  notesData.uiNotes ?? notesData.notes ?? '',
+      notes: notesData.uiNotes ?? notesData.notes ?? '',
       status: statusReverseMap[row.status] || 'scheduled',
       departure: mode === 'contrato' ? startDateStr : '',
       returnDate: mode === 'contrato' ? endDateStr : '',
@@ -301,8 +298,8 @@ const Contracts = () => {
     { header: 'Fecha Inicio', render: (row) => formatDate(row.start_date), width: '95px' },
     { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
     { header: 'Monto Total', render: (row) => formatCurrency(row.total_amount), width: '100px' },
-    { 
-      header: 'Estado', 
+    {
+      header: 'Estado',
       width: '100px',
       render: (row) => (
         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
@@ -319,7 +316,7 @@ const Contracts = () => {
   if (loading) return <Loading />;
 
   return (
-    <div className="p-6">
+    <div className="p-3 sm:p-4 md:p-6 min-w-0 overflow-x-hidden">
       
       <Header title="Contratos" 
         buttonText="+ Contrato/Servicio"
@@ -329,53 +326,53 @@ const Contracts = () => {
         }}
       />
 
-      <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+      <div className="mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200">
         <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Filtros</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-          <div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha inicio</label>
             <input
               type="date"
               value={filterFechaInicio}
               onChange={(e) => setFilterFechaInicio(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha fin</label>
             <input
               type="date"
               value={filterFechaFin}
               onChange={(e) => setFilterFechaFin(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Cliente</label>
             <input
               type="text"
               placeholder="Buscar..."
               value={filterCliente}
               onChange={(e) => setFilterCliente(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">No. contrato</label>
             <input
               type="text"
               placeholder="Buscar..."
               value={filterNoContrato}
               onChange={(e) => setFilterNoContrato(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
             <select
               value={filterEstado}
               onChange={(e) => setFilterEstado(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             >
               <option value="">Todos</option>
               <option value="Agendado">Agendado</option>
@@ -383,14 +380,14 @@ const Contracts = () => {
               <option value="Realizado">Realizado</option>
             </select>
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Destino</label>
             <input
               type="text"
               placeholder="Buscar..."
               value={filterDestino}
               onChange={(e) => setFilterDestino(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5"
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
         </div>

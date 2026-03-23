@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   getExpenses,
   createExpense,
@@ -17,21 +17,28 @@ import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 
 const EXPENSE_TYPES = [
-  { value: 'Luz', label: 'Luz' },
   { value: 'Agua', label: 'Agua' },
-  { value: 'Gas', label: 'Gas' },
-  { value: 'Internet', label: 'Internet' },
-  { value: 'Teléfono', label: 'Teléfono' },
-  { value: 'Contadores', label: 'Contadores' },
+  { value: 'Arrendamiento', label: 'Arrendamiento' },
   { value: 'AWS', label: 'AWS' },
-  { value: 'Google', label: 'Google' },
-  { value: 'Software', label: 'Software' },
+  { value: 'Casetas', label: 'Casetas' },
   { value: 'Combustible', label: 'Combustible' },
+  { value: 'Comisiones', label: 'Comisiones' },
+  { value: 'Contadores', label: 'Contadores' },
+  { value: 'Credito', label: 'Credito' },
+  { value: 'Gas', label: 'Gas' },
+  { value: 'Google', label: 'Google' },
+  { value: 'Impuestos', label: 'Impuestos' },
+  { value: 'Internet', label: 'Internet' },
+  { value: 'Luz', label: 'Luz' },
   { value: 'Mantenimiento', label: 'Mantenimiento' },
-  { value: 'Seguros', label: 'Seguros' },
   { value: 'Nómina', label: 'Nómina' },
+  { value: 'Otro', label: 'Otro' },
+  { value: 'Pago proveedor externo', label: 'Pago proveedor externo' },
   { value: 'Renta', label: 'Renta' },
-  { value: 'Otro', label: 'Otro' }
+  { value: 'Seguros', label: 'Seguros' },
+  { value: 'Software', label: 'Software' },
+  { value: 'Teléfono', label: 'Teléfono' },
+  { value: 'Viatico', label: 'Viatico' }
 ];
 
 const Expenses = () => {
@@ -42,6 +49,8 @@ const Expenses = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [toast, setToast] = useState(null);
+  const [tableSearch, setTableSearch] = useState('');
+  const [contractSearch, setContractSearch] = useState('');
   const [formData, setFormData] = useState({
     contract_id: '',
     expense_type: '',
@@ -150,6 +159,7 @@ const Expenses = () => {
   };
 
   const resetForm = () => {
+    setContractSearch('');
     setFormData({
       contract_id: '',
       expense_type: '',
@@ -175,16 +185,6 @@ const Expenses = () => {
     return new Date(date).toLocaleDateString('es-MX');
   };
 
-  const contractOptions = contracts.map((c) => ({
-    value: c.id,
-    label: `${c.contract_number || ''} - ${c.client_name || 'Sin cliente'}`
-  }));
-
-  const accountOptions = accounts.map((a) => ({
-    value: a.id,
-    label: `${a.account_name} (${a.bank_name || '-'})`
-  }));
-
   const getExpenseSource = (row) => {
     if (row.contract_number) return { type: 'contract', label: `Contrato ${row.contract_number}` };
     try {
@@ -195,6 +195,43 @@ const Expenses = () => {
     } catch {}
     return { type: 'company', label: 'Empresa' };
   };
+
+  const contractOptions = contracts.map((c) => ({
+    value: c.id,
+    label: `${c.contract_number || ''} - ${c.client_name || 'Sin cliente'}`
+  }));
+
+  const filteredContractOptions = useMemo(() => {
+    if (!contractSearch.trim()) return contractOptions;
+    const q = contractSearch.toLowerCase().trim();
+    return contractOptions.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(q) || String(opt.value).includes(q)
+    );
+  }, [contractOptions, contractSearch]);
+
+  const filteredExpenses = useMemo(() => {
+    if (!tableSearch.trim()) return expenses;
+    const q = tableSearch.toLowerCase().trim();
+    return expenses.filter((row) => {
+      const source = getExpenseSource(row);
+      if (source.type === 'contract') {
+        const contract = contracts.find((c) => c.id === row.contract_id);
+        const contractNum = row.contract_number || contract?.contract_number || '';
+        const clientName = contract?.client_name || '';
+        return (
+          contractNum.toLowerCase().includes(q) ||
+          clientName.toLowerCase().includes(q)
+        );
+      }
+      return source.label.toLowerCase().includes(q);
+    });
+  }, [expenses, tableSearch, contracts]);
+
+  const accountOptions = accounts.map((a) => ({
+    value: a.id,
+    label: `${a.account_name} (${a.bank_name || '-'})`
+  }));
 
   const columns = [
     {
@@ -222,9 +259,24 @@ const Expenses = () => {
         }}
       />
 
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Buscar por número de contrato o nombre del cliente..."
+          value={tableSearch}
+          onChange={(e) => setTableSearch(e.target.value)}
+          className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Mostrando {filteredExpenses.length} de {expenses.length} egresos
+          </p>
+        )}
+      </div>
+
       <Table
         columns={columns}
-        data={expenses}
+        data={filteredExpenses}
         onEdit={handleEdit}
         onDelete={handleDelete}
         sortable
@@ -240,12 +292,29 @@ const Expenses = () => {
         size="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Buscar contrato
+            </label>
+            <input
+              type="text"
+              placeholder="Escribe número de contrato o nombre del cliente..."
+              value={contractSearch}
+              onChange={(e) => setContractSearch(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
           <FormSelect
             label="Contrato (opcional - dejar vacío para gastos de empresa)"
             value={formData.contract_id}
             onChange={(e) => setFormData({ ...formData, contract_id: e.target.value })}
-            options={contractOptions}
+            options={filteredContractOptions}
           />
+          {contractSearch && filteredContractOptions.length === 0 && (
+            <p className="mt-1 text-sm text-amber-600">
+              No se encontraron contratos. Intenta con otro término.
+            </p>
+          )}
 
           <FormSelect
             label="Tipo de Gasto"

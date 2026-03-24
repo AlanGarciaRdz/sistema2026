@@ -3,6 +3,10 @@ const pool = require('../config/db');
 // Get dashboard metrics and data
 const getDashboardData = async (req, res) => {
   try {
+    const { start, end } = req.query;
+    const hasDateRange = start && end;
+    const dateParams = hasDateRange ? [start, end] : [];
+
     // Get total clients
     const clientsResult = await pool.query('SELECT COUNT(*) as total FROM clients');
     
@@ -16,41 +20,51 @@ const getDashboardData = async (req, res) => {
       "SELECT COUNT(*) as total FROM quotes WHERE status = 'Pendiente'"
     );
     
-    // Get total revenue for current month
-    const revenueResult = await pool.query(`
-      SELECT COALESCE(SUM(amount), 0) as total
-      FROM payments
-      WHERE EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-        AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-    `);
+    // Get total revenue: current month if no range, else by date range
+    const revenueQuery = hasDateRange
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE payment_date >= $1 AND payment_date <= $2`
+      : `SELECT COALESCE(SUM(amount), 0) as total FROM payments
+         WHERE EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+           AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)`;
+    const revenueResult = await pool.query(revenueQuery, dateParams);
 
-    // Get total expenses for current month
-    const expensesResult = await pool.query(`
-      SELECT COALESCE(SUM(amount), 0) as total
-      FROM expenses
-      WHERE EXTRACT(MONTH FROM expense_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-        AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-    `);
+    // Get total expenses: same logic
+    const expensesQuery = hasDateRange
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE expense_date >= $1 AND expense_date <= $2`
+      : `SELECT COALESCE(SUM(amount), 0) as total FROM expenses
+         WHERE EXTRACT(MONTH FROM expense_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+           AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)`;
+    const expensesResult = await pool.query(expensesQuery, dateParams);
 
-    // Get accounts with balance (payments - expenses) grouped by business_unit
-    const accountsResult = await pool.query(`
-      SELECT pa.id, pa.account_name, pa.bank_name,
-        COALESCE(pa.business_unit, 'Sin unidad') as business_unit,
-        COALESCE(p.total, 0)::numeric - COALESCE(e.total, 0)::numeric as balance
-      FROM payment_accounts pa
-      LEFT JOIN (
-        SELECT payment_account_id, SUM(amount) as total
-        FROM payments
-        GROUP BY payment_account_id
-      ) p ON pa.id = p.payment_account_id
-      LEFT JOIN (
-        SELECT payment_account_id, SUM(amount) as total
-        FROM expenses
-        GROUP BY payment_account_id
-      ) e ON pa.id = e.payment_account_id
-      WHERE pa.status = 'Active' OR pa.status IS NULL
-      ORDER BY pa.business_unit, pa.account_name
-    `);
+    // Accounts by business unit: all-time if no range, else filter by date range
+    const accountsQuery = hasDateRange
+      ? `SELECT pa.id, pa.account_name, pa.bank_name,
+           COALESCE(pa.business_unit, 'Sin unidad') as business_unit,
+           COALESCE(p.total, 0)::numeric - COALESCE(e.total, 0)::numeric as balance
+         FROM payment_accounts pa
+         LEFT JOIN (
+           SELECT payment_account_id, SUM(amount) as total FROM payments
+           WHERE payment_date >= $1 AND payment_date <= $2 GROUP BY payment_account_id
+         ) p ON pa.id = p.payment_account_id
+         LEFT JOIN (
+           SELECT payment_account_id, SUM(amount) as total FROM expenses
+           WHERE expense_date >= $1 AND expense_date <= $2 GROUP BY payment_account_id
+         ) e ON pa.id = e.payment_account_id
+         WHERE pa.status = 'Active' OR pa.status IS NULL
+         ORDER BY pa.business_unit, pa.account_name`
+      : `SELECT pa.id, pa.account_name, pa.bank_name,
+           COALESCE(pa.business_unit, 'Sin unidad') as business_unit,
+           COALESCE(p.total, 0)::numeric - COALESCE(e.total, 0)::numeric as balance
+         FROM payment_accounts pa
+         LEFT JOIN (
+           SELECT payment_account_id, SUM(amount) as total FROM payments GROUP BY payment_account_id
+         ) p ON pa.id = p.payment_account_id
+         LEFT JOIN (
+           SELECT payment_account_id, SUM(amount) as total FROM expenses GROUP BY payment_account_id
+         ) e ON pa.id = e.payment_account_id
+         WHERE pa.status = 'Active' OR pa.status IS NULL
+         ORDER BY pa.business_unit, pa.account_name`;
+    const accountsResult = await pool.query(accountsQuery, hasDateRange ? [start, end] : []);
     
     // Get 5 most recent contracts
     const recentContractsResult = await pool.query(`
@@ -100,7 +114,8 @@ const getDashboardData = async (req, res) => {
         activeContracts: parseInt(activeContractsResult.rows[0].total),
         pendingQuotes: parseInt(pendingQuotesResult.rows[0].total),
         currentMonthRevenue: parseFloat(revenueResult.rows[0].total),
-        currentMonthExpenses: parseFloat(expensesResult.rows[0].total)
+        currentMonthExpenses: parseFloat(expensesResult.rows[0].total),
+        dateRange: hasDateRange ? { start, end } : null
       },
       accountsByBusinessUnit,
       recentContracts: recentContractsResult.rows,

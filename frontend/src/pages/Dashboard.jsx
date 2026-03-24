@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { getDashboardData } from '../services/api';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
@@ -6,28 +7,46 @@ import Toast from '../components/Toast';
 import { Users, FileCheck, FileText, DollarSign, Receipt, CreditCard } from 'lucide-react';
 
 const Dashboard = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const dateStart = searchParams.get('start') || '';
+  const dateEnd = searchParams.get('end') || '';
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const response = await getDashboardData();
-      console.log(response.data.data);
-      setData(response.data.data);
-    } catch (error) {
-      setToast({
-        message: 'Error al cargar los datos del dashboard',
-        type: 'error'
-      });
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setLoading(true);
+        const params = {};
+        if (dateStart && dateEnd) {
+          params.start = dateStart;
+          params.end = dateEnd;
+        }
+        const response = await getDashboardData(params);
+        if (!cancelled) setData(response.data.data);
+      } catch (error) {
+        if (!cancelled) {
+          setToast({
+            message: 'Error al cargar los datos del dashboard',
+            type: 'error'
+          });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [dateStart, dateEnd]);
+
+  const handleDateChange = (start, end) => {
+    const next = new URLSearchParams(searchParams);
+    if (start) next.set('start', start); else next.delete('start');
+    if (end) next.set('end', end); else next.delete('end');
+    setSearchParams(next, { replace: true });
   };
 
   if (loading) return <Loading />;
@@ -49,9 +68,53 @@ const Dashboard = () => {
     return new Date(date).toLocaleDateString('es-MX');
   };
 
+  const hasDateRange = dateStart && dateEnd;
+  const revenueLabel = hasDateRange ? 'Ingresos (periodo)' : 'Ingresos del Mes';
+  const expensesLabel = hasDateRange ? 'Egresos (periodo)' : 'Egresos del Mes';
+  const accountsSubtitle = hasDateRange
+    ? `${dateStart} a ${dateEnd}`
+    : 'Todo el tiempo';
+
   return (
     <div className="p-6">
       <Header title="Dashboard" />
+
+      {/* Filtro de fechas */}
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Período (opcional)</p>
+        <div className="flex flex-wrap gap-4 items-end">
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Fecha inicio</label>
+            <input
+              type="date"
+              value={dateStart}
+              onChange={(e) => handleDateChange(e.target.value, dateEnd)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Fecha fin</label>
+            <input
+              type="date"
+              value={dateEnd}
+              onChange={(e) => handleDateChange(dateStart, e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          {(dateStart || dateEnd) && (
+            <button
+              type="button"
+              onClick={() => handleDateChange('', '')}
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
+              Limpiar
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-gray-500">
+          Sin fechas: ingresos/egresos = mes actual, cuentas = todo el tiempo. Con fechas: todo filtrado al período.
+        </p>
+      </div>
 
       {/* Metrics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
@@ -94,7 +157,7 @@ const Dashboard = () => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Ingresos del Mes</p>
+              <p className="text-sm text-gray-600 mb-1">{revenueLabel}</p>
               <p className="text-2xl font-bold text-gray-900">{formatCurrency(metrics.currentMonthRevenue)}</p>
             </div>
             <div className="bg-purple-100 p-3 rounded-lg">
@@ -106,7 +169,7 @@ const Dashboard = () => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Egresos del Mes</p>
+              <p className="text-sm text-gray-600 mb-1">{expensesLabel}</p>
               <p className="text-2xl font-bold text-gray-900">{formatCurrency(metrics.currentMonthExpenses)}</p>
             </div>
             <div className="bg-red-100 p-3 rounded-lg">
@@ -115,11 +178,11 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
-      {accountsByBusinessUnit.length}
       {/* Cuentas por Unidad de Negocio */}
       {accountsByBusinessUnit.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Cuentas por Unidad de Negocio</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-1">Cuentas por Unidad de Negocio</h2>
+          <p className="text-sm text-gray-500 mb-4">{accountsSubtitle}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {accountsByBusinessUnit.map((unit) => (
               <div key={unit.businessUnit} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">

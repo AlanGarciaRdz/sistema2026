@@ -10,7 +10,7 @@ const api = axios.create({
 });
 
 // Dashboard
-export const getDashboardData = () => api.get('/dashboard');
+export const getDashboardData = (params) => api.get('/dashboard', { params });
 
 // Clients
 export const getClients = () => api.get('/clients');

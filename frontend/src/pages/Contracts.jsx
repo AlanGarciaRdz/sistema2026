@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ContractService from '../components/ContractService';
-import { getContracts, deleteContract, createContract, updateContract, getPayments } from '../services/api';
+import { getContracts, deleteContract, createContract, updateContract, getPayments, getExpenses } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Loading from '../components/Loading';
@@ -22,6 +22,7 @@ const generateContractNumber = () => {
 const Contracts = () => {
   const [contracts, setContracts] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isContratoServicioOpen, setIsContratoServicioOpen] = useState(false);
@@ -38,7 +39,17 @@ const Contracts = () => {
   useEffect(() => {
     fetchContracts();
     fetchPayments();
+    fetchExpenses();
   }, []);
+
+  const fetchExpenses = async () => {
+    try {
+      const response = await getExpenses();
+      setExpenses(response.data.data || []);
+    } catch (err) {
+      console.error('Error fetching expenses:', err);
+    }
+  };
 
   const fetchPayments = async () => {
     try {
@@ -284,6 +295,23 @@ const Contracts = () => {
       .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
   };
 
+  const getExpensesByConcept = (contractId) => {
+    const list = (expenses || []).filter(
+      (e) => e.contract_id != null && e.contract_id == contractId
+    );
+    const byConcept = {};
+    for (const e of list) {
+      const t = e.expense_type || 'Otro';
+      byConcept[t] = (byConcept[t] || 0) + (parseFloat(e.amount) || 0);
+    }
+    return byConcept;
+  };
+
+  const getTotalExpenses = (contractId) => {
+    const byConcept = getExpensesByConcept(contractId);
+    return Object.values(byConcept).reduce((s, v) => s + v, 0);
+  };
+
   const getAssignedUnit = (row) => {
     if (row.vehicle_name) return row.vehicle_name;
     try {
@@ -316,12 +344,25 @@ const Contracts = () => {
     { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
     {
       header: 'Monto Total',
-      width: '120px',
+      width: '170px',
       render: (row) => {
         const total = parseFloat(row.total_amount) || 0;
         const paid = getPaidAmount(row.id);
         const remaining = total - paid;
         const hasPayments = paid > 0;
+        const byConcept = getExpensesByConcept(row.id);
+        const totalExpenses = Object.values(byConcept).reduce((s, v) => s + v, 0);
+        const hasExpenses = totalExpenses > 0;
+        const utilidad = paid - totalExpenses;
+        const pctUtilidad = paid > 0 ? ((utilidad / paid) * 100).toFixed(1) : null;
+
+        const start = row.start_date ? new Date(row.start_date) : null;
+        const end = row.end_date ? new Date(row.end_date) : null;
+        const days = start && end
+          ? Math.max(1, Math.ceil((end - start) / (24 * 60 * 60 * 1000)) + 1)
+          : 0;
+        const utilidadPorDia = days > 0 && hasPayments ? utilidad / days : null;
+
         return (
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">{formatCurrency(total)}</span>
@@ -330,6 +371,24 @@ const Contracts = () => {
                 <span className="text-xs text-green-600">Abonado: {formatCurrency(paid)}</span>
                 <span className="text-xs text-amber-600">Falta: {formatCurrency(remaining)}</span>
               </>
+            )}
+            {hasExpenses && (
+              <>
+                {Object.entries(byConcept).map(([tipo, monto]) => (
+                  <span key={tipo} className="text-xs text-gray-600">
+                    {tipo}: {formatCurrency(monto)}
+                  </span>
+                ))}
+                <span className={`text-xs font-medium ${utilidad >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  Utilidad: {formatCurrency(utilidad)}
+                  {pctUtilidad != null && ` (${pctUtilidad}%)`}
+                </span>
+              </>
+            )}
+            {utilidadPorDia != null && (
+              <span className="text-xs text-blue-600 font-medium">
+                Utilidad/día: {formatCurrency(utilidadPorDia)}
+              </span>
             )}
           </div>
         );

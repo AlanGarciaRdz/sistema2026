@@ -4,6 +4,7 @@ import {
   createExpense,
   updateExpense,
   deleteExpense,
+  validateExpense,
   getContracts,
   getPaymentAccounts
 } from '../services/api';
@@ -51,6 +52,9 @@ const Expenses = () => {
   const [toast, setToast] = useState(null);
   const [tableSearch, setTableSearch] = useState('');
   const [contractSearch, setContractSearch] = useState('');
+  const [viewMode, setViewMode] = useState('all');
+  const [validateModal, setValidateModal] = useState(null);
+  const [validateAccountId, setValidateAccountId] = useState('');
   const [formData, setFormData] = useState({
     contract_id: '',
     expense_type: '',
@@ -63,15 +67,20 @@ const Expenses = () => {
   });
 
   useEffect(() => {
-    fetchExpenses();
     fetchContracts();
     fetchAccounts();
   }, []);
 
+  useEffect(() => {
+    fetchExpenses();
+  }, [viewMode]);
+
   const fetchExpenses = async () => {
     try {
       setLoading(true);
-      const response = await getExpenses();
+      const params =
+        viewMode === 'pending' ? { validation_status: 'pending' } : {};
+      const response = await getExpenses(params);
       setExpenses(response.data.data || []);
     } catch (error) {
       setToast({ message: 'Error al cargar gastos', type: 'error' });
@@ -144,6 +153,41 @@ const Expenses = () => {
       notes: expense.notes || ''
     });
     setIsModalOpen(true);
+  };
+
+  const openValidateModal = (expense) => {
+    setValidateModal(expense);
+    setValidateAccountId('');
+  };
+
+  const handleValidateApprove = async (e) => {
+    e.preventDefault();
+    if (!validateAccountId) {
+      setToast({ message: 'Seleccione la cuenta contable', type: 'error' });
+      return;
+    }
+    try {
+      await validateExpense(validateModal.id, {
+        action: 'approve',
+        payment_account_id: parseInt(validateAccountId, 10)
+      });
+      setToast({ message: 'Gasto validado', type: 'success' });
+      setValidateModal(null);
+      fetchExpenses();
+    } catch (error) {
+      setToast({ message: error.response?.data?.error || 'Error al validar', type: 'error' });
+    }
+  };
+
+  const handleRejectRow = async (row) => {
+    if (!window.confirm('¿Rechazar este gasto del chofer?')) return;
+    try {
+      await validateExpense(row.id, { action: 'reject' });
+      setToast({ message: 'Gasto rechazado', type: 'success' });
+      fetchExpenses();
+    } catch (error) {
+      setToast({ message: error.response?.data?.error || 'Error', type: 'error' });
+    }
   };
 
   const handleDelete = async (expense) => {
@@ -233,18 +277,37 @@ const Expenses = () => {
     label: `${a.account_name} (${a.bank_name || '-'})`
   }));
 
-  const columns = [
-    {
+  const validationLabel = (row) => {
+    const v = row.validation_status || 'approved';
+    if (v === 'pending') return <span className="text-amber-700 font-medium">Por validar</span>;
+    if (v === 'rejected') return <span className="text-red-600">Rechazado</span>;
+    return '—';
+  };
+
+  const columns = useMemo(() => {
+    const origen = {
       header: 'Origen',
       accessor: 'contract_number',
       render: (row) => getExpenseSource(row).label
-    },
-    { header: 'Tipo de Gasto', accessor: 'expense_type' },
-    { header: 'Monto', render: (row) => formatCurrency(row.amount) },
-    { header: 'Cuenta', accessor: 'account_name' },
-    { header: 'Unidad de Negocio', accessor: 'business_unit' },
-    { header: 'Fecha', render: (row) => formatDate(row.expense_date) }
-  ];
+    };
+    const tipo = { header: 'Tipo de Gasto', accessor: 'expense_type' };
+    const monto = { header: 'Monto', render: (row) => formatCurrency(row.amount) };
+    const estado = {
+      header: 'Estado',
+      render: (row) => validationLabel(row)
+    };
+    const forma = {
+      header: 'Forma (chofer)',
+      render: (row) => row.driver_payment_method || '—'
+    };
+    const cuenta = { header: 'Cuenta', accessor: 'account_name' };
+    const unidad = { header: 'Unidad de Negocio', accessor: 'business_unit' };
+    const fecha = { header: 'Fecha', render: (row) => formatDate(row.expense_date) };
+    if (viewMode === 'pending') {
+      return [origen, tipo, monto, forma, cuenta, unidad, fecha];
+    }
+    return [origen, tipo, monto, estado, forma, cuenta, unidad, fecha];
+  }, [viewMode]);
 
   if (loading) return <Loading />;
 
@@ -258,6 +321,31 @@ const Expenses = () => {
           setIsModalOpen(true);
         }}
       />
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setViewMode('all')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium ${
+            viewMode === 'all'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+          }`}
+        >
+          Todos los egresos
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('pending')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium ${
+            viewMode === 'pending'
+              ? 'bg-amber-600 text-white'
+              : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+          }`}
+        >
+          Por validar (chofer)
+        </button>
+      </div>
 
       <div className="mb-4">
         <input
@@ -277,8 +365,32 @@ const Expenses = () => {
       <Table
         columns={columns}
         data={filteredExpenses}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
+        onEdit={viewMode === 'pending' ? undefined : handleEdit}
+        onDelete={viewMode === 'pending' ? undefined : handleDelete}
+        customActions={
+          viewMode === 'pending'
+            ? (row) => (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openValidateModal(row)}
+                    className="text-green-600 hover:text-green-900 font-medium px-2 py-1"
+                    title="Aprobar y asignar cuenta"
+                  >
+                    Validar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRejectRow(row)}
+                    className="text-red-600 hover:text-red-900 font-medium px-2 py-1"
+                    title="Rechazar"
+                  >
+                    Rechazar
+                  </button>
+                </>
+              )
+            : undefined
+        }
         sortable
       />
 
@@ -381,6 +493,41 @@ const Expenses = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!validateModal}
+        onClose={() => setValidateModal(null)}
+        title="Validar gasto del chofer"
+        size="md"
+      >
+        {validateModal && (
+          <form onSubmit={handleValidateApprove} className="space-y-4">
+            <p className="text-sm text-gray-600">
+              <strong>{validateModal.expense_type}</strong> ·{' '}
+              {formatCurrency(validateModal.amount)} · Contrato{' '}
+              {validateModal.contract_number || '—'}
+            </p>
+            <p className="text-sm text-gray-600">
+              Forma reportada: <strong>{validateModal.driver_payment_method || '—'}</strong>
+            </p>
+            <FormSelect
+              label="Cuenta (donde se descuenta)"
+              value={validateAccountId}
+              onChange={(e) => setValidateAccountId(e.target.value)}
+              options={accountOptions}
+              required
+            />
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button variant="secondary" type="button" onClick={() => setValidateModal(null)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" type="submit">
+                Aprobar gasto
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

@@ -5,9 +5,22 @@ import Header from '../components/Header';
 import Table from '../components/Table';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { FileDown, Copy, Eye } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { FileDown, Copy, Eye, Link2, Share2 } from 'lucide-react';
 import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
 import TripSummaryModal from '../components/TripSummaryModal';
+
+const driverPortalPath = (contractNumber) => `/c/${encodeURIComponent(contractNumber)}`;
+
+const copyDriverPortalLink = async (contractNumber, setToast) => {
+  const url = `${window.location.origin}/sistema${driverPortalPath(contractNumber)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    setToast({ message: 'Link para chofer copiado al portapapeles', type: 'success' });
+  } catch {
+    setToast({ message: 'No se pudo copiar. Copie manualmente la URL.', type: 'error' });
+  }
+};
 
 const generateContractNumber = () => {
   const now = new Date();
@@ -502,6 +515,23 @@ const Contracts = () => {
               title="Resumen del viaje"
             >
               <Eye size={18} />
+            </button>
+            <Link
+              to={driverPortalPath(row.contract_number)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-600 hover:text-indigo-800 transition-colors p-1 inline-flex"
+              title="Portal chofer (gastos/efectivo)"
+            >
+              <Link2 size={18} />
+            </Link>
+            <button
+              type="button"
+              onClick={() => copyDriverPortalLink(row.contract_number, setToast)}
+              className="text-indigo-500 hover:text-indigo-700 transition-colors p-1"
+              title="Copiar link portal chofer (WhatsApp)"
+            >
+              <Share2 size={18} />
             </button>
             <button
               onClick={() => handleCopy(row)}

@@ -49,7 +49,8 @@ export const updatePaymentAccount = (id, data) => api.put(`/payment-accounts/${i
 export const deletePaymentAccount = (id) => api.delete(`/payment-accounts/${id}`);
 
 // Expenses
-export const getExpenses = () => api.get('/expenses');
+export const getExpenses = (params) => api.get('/expenses', { params });
+export const validateExpense = (id, data) => api.patch(`/expenses/${id}/validate`, data);
 export const getExpenseById = (id) => api.get(`/expenses/${id}`);
 export const createExpense = (data) => api.post('/expenses', data);
 export const updateExpense = (id, data) => api.put(`/expenses/${id}`, data);
@@ -68,6 +69,19 @@ export const getVehicleById = (id) => api.get(`/vehicles/${id}`);
 export const createVehicle = (data) => api.post('/vehicles', data);
 export const updateVehicle = (id, data) => api.put(`/vehicles/${id}`, data);
 export const deleteVehicle = (id) => api.delete(`/vehicles/${id}`);
+
+// Driver portal (choferes, sin login)
+export const getDriverPortal = (contractNumber) =>
+  api.get(`/driver-portal/${encodeURIComponent(contractNumber)}`);
+export const postDriverPortalExpense = (contractNumber, data) =>
+  api.post(`/driver-portal/${encodeURIComponent(contractNumber)}/expenses`, data);
+export const postDriverPortalPayment = (contractNumber, data) =>
+  api.post(`/driver-portal/${encodeURIComponent(contractNumber)}/payments`, data);
+export const putDriverPortalExpense = (contractNumber, expenseId, data) =>
+  api.put(
+    `/driver-portal/${encodeURIComponent(contractNumber)}/expenses/${expenseId}`,
+    data
+  );
 
 // Maintenance
 export const getMaintenance = () => api.get('/maintenance');

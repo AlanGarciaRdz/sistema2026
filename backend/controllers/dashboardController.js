@@ -108,6 +108,21 @@ const getDashboardData = async (req, res) => {
     }
     const accountsByBusinessUnit = Object.values(accountsByUnit);
 
+    const accountsByBankMap = {};
+    for (const row of accountsResult.rows) {
+      const raw = row.bank_name != null ? String(row.bank_name).trim() : '';
+      const bank = raw || 'Sin banco';
+      if (!accountsByBankMap[bank]) {
+        accountsByBankMap[bank] = { bankName: bank, totalBalance: 0, accountCount: 0 };
+      }
+      const balance = parseFloat(row.balance) || 0;
+      accountsByBankMap[bank].totalBalance += balance;
+      accountsByBankMap[bank].accountCount += 1;
+    }
+    const accountsByBank = Object.values(accountsByBankMap).sort(
+      (a, b) => b.totalBalance - a.totalBalance || a.bankName.localeCompare(b.bankName, 'es')
+    );
+
     const dashboardData = {
       metrics: {
         totalClients: parseInt(clientsResult.rows[0].total),
@@ -117,6 +132,7 @@ const getDashboardData = async (req, res) => {
         currentMonthExpenses: parseFloat(expensesResult.rows[0].total),
         dateRange: hasDateRange ? { start, end } : null
       },
+      accountsByBank,
       accountsByBusinessUnit,
       recentContracts: recentContractsResult.rows,
       upcomingAssignments: upcomingAssignmentsResult.rows

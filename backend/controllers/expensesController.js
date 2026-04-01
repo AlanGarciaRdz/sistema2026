@@ -3,11 +3,14 @@ const pool = require('../config/db');
 // Get all expenses (?validation_status=pending|approved|rejected)
 const getAllExpenses = async (req, res) => {
   try {
-    const { validation_status } = req.query;
+    const { validation_status, limit } = req.query;
     let sql = `
-      SELECT e.*, co.contract_number, pa.account_name
+      SELECT e.*, co.contract_number,
+        co.origin AS contract_origin, co.destination AS contract_destination,
+        c.name AS client_name, pa.account_name
       FROM expenses e
       LEFT JOIN contracts co ON e.contract_id = co.id
+      LEFT JOIN clients c ON co.client_id = c.id
       LEFT JOIN payment_accounts pa ON e.payment_account_id = pa.id
     `;
     const params = [];
@@ -16,6 +19,11 @@ const getAllExpenses = async (req, res) => {
       sql += ` WHERE e.validation_status = $${params.length}`;
     }
     sql += ' ORDER BY e.expense_date DESC, e.id DESC';
+    const lim = parseInt(limit, 10);
+    if (!Number.isNaN(lim) && lim > 0 && lim <= 500) {
+      params.push(lim);
+      sql += ` LIMIT $${params.length}`;
+    }
     const result = await pool.query(sql, params);
     res.json({ success: true, data: result.rows });
   } catch (error) {
@@ -29,9 +37,12 @@ const getExpenseById = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT e.*, co.contract_number, pa.account_name
+      SELECT e.*, co.contract_number,
+        co.origin AS contract_origin, co.destination AS contract_destination,
+        c.name AS client_name, pa.account_name
       FROM expenses e
       LEFT JOIN contracts co ON e.contract_id = co.id
+      LEFT JOIN clients c ON co.client_id = c.id
       LEFT JOIN payment_accounts pa ON e.payment_account_id = pa.id
       WHERE e.id = $1
     `, [id]);

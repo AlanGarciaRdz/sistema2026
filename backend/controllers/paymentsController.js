@@ -59,6 +59,12 @@ const getPaymentById = async (req, res) => {
   }
 };
 
+const parseContractId = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 // Create new payment
 const createPayment = async (req, res) => {
   try {
@@ -66,7 +72,15 @@ const createPayment = async (req, res) => {
       contract_id, quote_id, contract_number, payment_type, amount, payment_method,
       payment_account_id, payment_date, invoice_number, iva_amount, notes
     } = req.body;
-    
+
+    const cid = parseContractId(contract_id);
+    const notesValue =
+      notes != null && String(notes).trim() !== ''
+        ? notes
+        : quote_id != null && quote_id !== ''
+          ? JSON.stringify({ quote_id: quote_id })
+          : null;
+
     const result = await pool.query(
       `INSERT INTO payments (
         contract_id, contract_number, payment_type, amount, payment_method,
@@ -74,9 +88,9 @@ const createPayment = async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *`,
       [
-        contract_id || quote_id, contract_number, payment_type, amount, payment_method,
-        payment_account_id, payment_date, invoice_number, iva_amount, 
-        notes || JSON.stringify({ quote_id })
+        cid, contract_number, payment_type, amount, payment_method,
+        payment_account_id, payment_date, invoice_number, iva_amount,
+        notesValue
       ]
     );
     
@@ -96,6 +110,14 @@ const updatePayment = async (req, res) => {
       payment_account_id, payment_date, invoice_number, iva_amount, notes
     } = req.body;
     
+    const cid = parseContractId(contract_id);
+    const notesValue =
+      notes != null && String(notes).trim() !== ''
+        ? notes
+        : quote_id != null && quote_id !== ''
+          ? JSON.stringify({ quote_id: quote_id })
+          : null;
+
     const result = await pool.query(
       `UPDATE payments SET
         contract_id = $1, contract_number = $2, payment_type = $3, amount = $4,
@@ -105,9 +127,9 @@ const updatePayment = async (req, res) => {
       WHERE id = $11
       RETURNING *`,
       [
-        contract_id || quote_id, contract_number, payment_type, amount, payment_method,
-        payment_account_id, payment_date, invoice_number, iva_amount, 
-        notes || JSON.stringify({ quote_id }), id
+        cid, contract_number, payment_type, amount, payment_method,
+        payment_account_id, payment_date, invoice_number, iva_amount,
+        notesValue, id
       ]
     );
     

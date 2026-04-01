@@ -90,7 +90,9 @@ const Contracts = () => {
       const statusMap = {
         scheduled: 'Agendado',
         in_progress: 'En proceso',
-        complete: 'Realizado'
+        complete: 'Realizado',
+        pending_collect: 'Por cobrar',
+        pending_pay: 'Por pagar'
       };
 
       const isContrato = payload.mode === 'contrato';
@@ -154,7 +156,9 @@ const Contracts = () => {
     const statusReverseMap = {
       Agendado: 'scheduled',
       'En proceso': 'in_progress',
-      Realizado: 'complete'
+      Realizado: 'complete',
+      'Por cobrar': 'pending_collect',
+      'Por pagar': 'pending_pay'
     };
 
     const mode = notesData.mode || 'contrato';
@@ -200,7 +204,9 @@ const Contracts = () => {
     const statusReverseMap = {
       Agendado: 'scheduled',
       'En proceso': 'in_progress',
-      Realizado: 'complete'
+      Realizado: 'complete',
+      'Por cobrar': 'pending_collect',
+      'Por pagar': 'pending_pay'
     };
 
     const mode = notesData.mode || 'contrato';
@@ -414,6 +420,9 @@ const Contracts = () => {
         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
           row.status === 'Agendado' ? 'bg-green-100 text-green-800' :
           row.status === 'Realizado' ? 'bg-blue-100 text-blue-800' :
+          row.status === 'Por cobrar' ? 'bg-amber-100 text-amber-900' :
+          row.status === 'Por pagar' ? 'bg-orange-100 text-orange-900' :
+          row.status === 'En proceso' ? 'bg-yellow-100 text-yellow-900' :
           'bg-red-100 text-red-800'
         }`}>
           {row.status}
@@ -487,6 +496,8 @@ const Contracts = () => {
               <option value="Agendado">Agendado</option>
               <option value="En proceso">En proceso</option>
               <option value="Realizado">Realizado</option>
+              <option value="Por cobrar">Por cobrar</option>
+              <option value="Por pagar">Por pagar</option>
             </select>
           </div>
           <div className="min-w-0">

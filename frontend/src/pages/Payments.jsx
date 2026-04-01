@@ -24,7 +24,7 @@ const Payments = () => {
   const [sourceSearch, setSourceSearch] = useState('');
   const [tableSearch, setTableSearch] = useState('');
   const [formData, setFormData] = useState({
-    sourceType: 'quote', // 'quote' or 'contract'
+    sourceType: 'quote', // 'quote' | 'contract' | 'none'
     sourceId: '',
     paymentType: 'Parcial',
     amount: '',
@@ -109,18 +109,22 @@ const Payments = () => {
   };
 
   const handleEdit = (payment) => {
-    // Parse notes to get quote_id if exists
-    let sourceType = 'contract';
-    let sourceId = payment.contract_id || '';
-    
-    try {
-      const notesData = JSON.parse(payment.notes || '{}');
-      if (notesData.quote_id) {
-        sourceType = 'quote';
-        sourceId = notesData.quote_id;
-      }
-    } catch {}
-    
+    let sourceType = 'none';
+    let sourceId = '';
+
+    if (payment.contract_id) {
+      sourceType = 'contract';
+      sourceId = String(payment.contract_id);
+    } else {
+      try {
+        const notesData = JSON.parse(payment.notes || '{}');
+        if (notesData.quote_id) {
+          sourceType = 'quote';
+          sourceId = String(notesData.quote_id);
+        }
+      } catch {}
+    }
+
     setEditingPayment(payment);
     setFormData({
       sourceType: sourceType,
@@ -137,16 +141,25 @@ const Payments = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
+    if (formData.sourceType !== 'none' && !formData.sourceId) {
+      setToast({
+        message: 'Seleccione una cotización o un contrato',
+        type: 'error'
+      });
+      return;
+    }
+
     try {
-      // Store quote_id in notes as JSON if it's a quote payment
-      const additionalNotes = formData.sourceType === 'quote' 
-        ? JSON.stringify({ quote_id: formData.sourceId })
-        : null;
+      const additionalNotes =
+        formData.sourceType === 'quote'
+          ? JSON.stringify({ quote_id: formData.sourceId })
+          : null;
 
       const paymentData = {
-        contract_id: formData.sourceType === 'contract' ? formData.sourceId : null,
-        contract_number: null, // Can be filled if needed
+        contract_id:
+          formData.sourceType === 'contract' ? formData.sourceId : null,
+        contract_number: null,
         payment_type: formData.paymentType,
         amount: parseFloat(formData.amount),
         payment_method: formData.paymentMethod,
@@ -184,26 +197,24 @@ const Payments = () => {
 
   const generateReceipt = async (payment) => {
     try {
-      // Get source data (quote or contract)
       let serviceData = null;
       let sourceId = null;
-      
-      // Try to get quote_id from notes first
+      let sourceTypeForReceipt = 'none';
+
       try {
         const notesData = JSON.parse(payment.notes || '{}');
         if (notesData.quote_id) {
           sourceId = notesData.quote_id;
-          formData.sourceType = 'quote';
+          sourceTypeForReceipt = 'quote';
         }
       } catch {}
-      
-      // If no quote_id in notes, use contract_id
+
       if (!sourceId && payment.contract_id) {
         sourceId = payment.contract_id;
-        formData.sourceType = 'contract';
+        sourceTypeForReceipt = 'contract';
       }
 
-      if (formData.sourceType === 'quote' && sourceId) {
+      if (sourceTypeForReceipt === 'quote' && sourceId) {
         const quote = quotes.find(q => q.id === parseInt(sourceId));
         if (quote) {
           serviceData = {
@@ -217,7 +228,7 @@ const Payments = () => {
             totalAmount: quote.total_amount || 0
           };
         }
-      } else if (formData.sourceType === 'contract' && sourceId) {
+      } else if (sourceTypeForReceipt === 'contract' && sourceId) {
         const contract = contracts.find(c => c.id === parseInt(sourceId));
         if (contract) {
           serviceData = {
@@ -231,12 +242,11 @@ const Payments = () => {
         }
       }
 
-      // Fallback if no service data found
       if (!serviceData) {
         serviceData = {
-          type: 'Servicio',
-          number: 'N/A',
-          client: 'N/A',
+          type: sourceTypeForReceipt === 'none' ? 'Otro ingreso' : 'Servicio',
+          number: '—',
+          client: '—',
           startDate: '',
           endDate: '',
           totalAmount: payment.amount
@@ -349,19 +359,30 @@ const Payments = () => {
     if (!tableSearch.trim()) return payments;
     const q = tableSearch.toLowerCase().trim();
     return payments.filter((p) => {
+      let notesData = {};
       try {
-        const notesData = JSON.parse(p.notes || '{}');
-        if (notesData.quote_id) {
-          const quote = quotes.find(qu => qu.id === parseInt(notesData.quote_id));
-          if (quote) {
-            return (
-              String(notesData.quote_id).includes(q) ||
-              (quote.client_name || '').toLowerCase().includes(q) ||
-              (quote.quote_number || '').toLowerCase().includes(q)
-            );
-          }
-        }
+        notesData = JSON.parse(p.notes || '{}');
       } catch {}
+
+      if (notesData.quote_id) {
+        const quote = quotes.find((qu) => qu.id === parseInt(notesData.quote_id, 10));
+        if (quote) {
+          return (
+            String(notesData.quote_id).includes(q) ||
+            (quote.client_name || '').toLowerCase().includes(q) ||
+            (quote.quote_number || '').toLowerCase().includes(q)
+          );
+        }
+      }
+
+      if (!p.contract_id) {
+        return (
+          q.includes('otro') ||
+          q.includes('sin contrato') ||
+          q.includes('ingreso')
+        );
+      }
+
       const contract = contracts.find(c => c.id === p.contract_id);
       const contractNum = p.contract_number || contract?.contract_number || '';
       const clientName = contract?.client_name || p.client_name || '';
@@ -374,7 +395,7 @@ const Payments = () => {
   }, [payments, tableSearch, quotes, contracts]);
 
   const columns = [
-    { 
+        { 
       header: 'Contrato', 
       render: (row) => {
         try {
@@ -393,6 +414,14 @@ const Payments = () => {
             );
           }
         } catch {}
+        if (!row.contract_id) {
+          return (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-medium text-gray-700">Otro ingreso</span>
+              <span className="text-xs text-gray-500">Sin contrato ni cotización</span>
+            </div>
+          );
+        }
         const contract = contracts.find(c => c.id === row.contract_id);
         const label = row.contract_number ? `Contrato ${row.contract_number}` : (contract?.contract_number ? `Contrato ${contract.contract_number}` : 'N/A');
         const client = contract?.client_name || row.client_name || '-';
@@ -415,6 +444,8 @@ const Payments = () => {
   ];
 
   const getSourceOptions = () => {
+    if (formData.sourceType === 'none') return [];
+
     const search = (sourceSearch || '').toLowerCase().trim();
     const filterBySearch = (item, label) =>
       !search || label.toLowerCase().includes(search) || String(item.value).includes(search);
@@ -484,7 +515,7 @@ const Payments = () => {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Origen del Pago
             </label>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               <label className="flex items-center">
                 <input
                   type="radio"
@@ -511,40 +542,67 @@ const Payments = () => {
                 />
                 Contrato
               </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="none"
+                  checked={formData.sourceType === 'none'}
+                  onChange={(e) => {
+                    setSourceSearch('');
+                    setFormData({ ...formData, sourceType: e.target.value, sourceId: '' });
+                  }}
+                  className="mr-2"
+                />
+                Otro (sin contrato ni cotización)
+              </label>
             </div>
           </div>
 
-          {/* Search / Lookup */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Buscar {formData.sourceType === 'quote' ? 'cotización' : 'contrato'}
-            </label>
-            <input
-              type="text"
-              placeholder={formData.sourceType === 'quote'
-                ? 'Escribe #, número o nombre del cliente...'
-                : 'Escribe número de contrato o nombre del cliente...'}
-              value={sourceSearch}
-              onChange={(e) => setSourceSearch(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+          {formData.sourceType !== 'none' && (
+            <>
+              {/* Search / Lookup */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Buscar {formData.sourceType === 'quote' ? 'cotización' : 'contrato'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={formData.sourceType === 'quote'
+                    ? 'Escribe #, número o nombre del cliente...'
+                    : 'Escribe número de contrato o nombre del cliente...'}
+                  value={sourceSearch}
+                  onChange={(e) => setSourceSearch(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
 
-          {/* Source Selection */}
-          <div>
-            <FormSelect
-              label={formData.sourceType === 'quote' ? 'Seleccionar Cotización' : 'Seleccionar Contrato'}
-              value={formData.sourceId}
-              onChange={(e) => setFormData({ ...formData, sourceId: e.target.value })}
-              options={getSourceOptions()}
-              required
-            />
-            {sourceSearch && getSourceOptions().length === 0 && (
-              <p className="mt-1 text-sm text-amber-600">
-                No se encontraron {formData.sourceType === 'quote' ? 'cotizaciones' : 'contratos'}. Intenta con otro término.
+              {/* Source Selection */}
+              <div>
+                <FormSelect
+                  label={formData.sourceType === 'quote' ? 'Seleccionar Cotización' : 'Seleccionar Contrato'}
+                  value={formData.sourceId}
+                  onChange={(e) => setFormData({ ...formData, sourceId: e.target.value })}
+                  options={getSourceOptions()}
+                  required
+                />
+                {sourceSearch && getSourceOptions().length === 0 && (
+                  <p className="mt-1 text-sm text-amber-600">
+                    No se encontraron {formData.sourceType === 'quote' ? 'cotizaciones' : 'contratos'}. Intenta con otro término.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {formData.sourceType === 'none' && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+              <p className="font-medium text-slate-900 mb-1">Ingreso general</p>
+              <p>
+                El pago no quedará vinculado a un contrato ni a una cotización. Útil para cobros, anticipos
+                u otros ingresos que no correspondan a un servicio catalogado.
               </p>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             {/* Payment Type */}

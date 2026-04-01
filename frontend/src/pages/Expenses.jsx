@@ -35,6 +35,9 @@ const EXPENSE_TYPES = [
   { value: 'Nómina', label: 'Nómina' },
   { value: 'Otro', label: 'Otro' },
   { value: 'Pago proveedor externo', label: 'Pago proveedor externo' },
+  { value: 'Estacionamiento', label: 'Estacionamiento' },
+  { value: 'Hotel', label: 'Hotel' },
+  { value: 'Derecho Piso Aeropuerto', label: 'Derecho piso aeropuerto' },
   { value: 'Renta', label: 'Renta' },
   { value: 'Seguros', label: 'Seguros' },
   { value: 'Software', label: 'Software' },
@@ -79,7 +82,9 @@ const Expenses = () => {
     try {
       setLoading(true);
       const params =
-        viewMode === 'pending' ? { validation_status: 'pending' } : {};
+        viewMode === 'pending'
+          ? { validation_status: 'pending' }
+          : { limit: 20 };
       const response = await getExpenses(params);
       setExpenses(response.data.data || []);
     } catch (error) {
@@ -262,15 +267,53 @@ const Expenses = () => {
       if (source.type === 'contract') {
         const contract = contracts.find((c) => c.id === row.contract_id);
         const contractNum = row.contract_number || contract?.contract_number || '';
-        const clientName = contract?.client_name || '';
+        const clientName = (row.client_name || contract?.client_name || '').toLowerCase();
+        const origin = (row.contract_origin || '').toLowerCase();
+        const dest = (row.contract_destination || '').toLowerCase();
         return (
           contractNum.toLowerCase().includes(q) ||
-          clientName.toLowerCase().includes(q)
+          clientName.includes(q) ||
+          origin.includes(q) ||
+          dest.includes(q)
         );
       }
       return source.label.toLowerCase().includes(q);
     });
   }, [expenses, tableSearch, contracts]);
+
+  const groupedExpenseSections = useMemo(() => {
+    const list = filteredExpenses;
+    const byContract = new Map();
+    const otros = [];
+    for (const row of list) {
+      if (row.contract_id) {
+        if (!byContract.has(row.contract_id)) byContract.set(row.contract_id, []);
+        byContract.get(row.contract_id).push(row);
+      } else {
+        otros.push(row);
+      }
+    }
+    const sortByDateDesc = (rows) =>
+      [...rows].sort((a, b) => {
+        const da = new Date(a.expense_date || 0).getTime();
+        const db = new Date(b.expense_date || 0).getTime();
+        return db - da;
+      });
+    const contractIds = [...byContract.keys()].sort((a, b) => {
+      const na = byContract.get(a)[0]?.contract_number || '';
+      const nb = byContract.get(b)[0]?.contract_number || '';
+      return String(na).localeCompare(String(nb), 'es', { numeric: true });
+    });
+    const sections = contractIds.map((id) => ({
+      key: `contract-${id}`,
+      kind: 'contract',
+      rows: sortByDateDesc(byContract.get(id))
+    }));
+    for (const row of sortByDateDesc(otros)) {
+      sections.push({ key: `other-${row.id}`, kind: 'other', rows: [row] });
+    }
+    return sections;
+  }, [filteredExpenses]);
 
   const accountOptions = accounts.map((a) => ({
     value: a.id,
@@ -284,11 +327,26 @@ const Expenses = () => {
     return '—';
   };
 
-  const columns = useMemo(() => {
+  const allViewColumns = useMemo(() => {
     const origen = {
       header: 'Origen',
       accessor: 'contract_number',
-      render: (row) => getExpenseSource(row).label
+      wrap: true,
+      maxWidth: '240px',
+      render: (row) => {
+        if (row.contract_number) {
+          return (
+            <div className="flex flex-col gap-0.5 text-sm">
+              <span className="font-semibold text-gray-900">Contrato {row.contract_number}</span>
+              <span className="text-gray-700">{row.client_name || 'Cliente'}</span>
+              <span className="text-xs text-gray-500">
+                {(row.contract_origin || '—') + ' → ' + (row.contract_destination || '—')}
+              </span>
+            </div>
+          );
+        }
+        return <span>{getExpenseSource(row).label}</span>;
+      }
     };
     const tipo = { header: 'Tipo de Gasto', accessor: 'expense_type' };
     const monto = { header: 'Monto', render: (row) => formatCurrency(row.amount) };
@@ -303,11 +361,21 @@ const Expenses = () => {
     const cuenta = { header: 'Cuenta', accessor: 'account_name' };
     const unidad = { header: 'Unidad de Negocio', accessor: 'business_unit' };
     const fecha = { header: 'Fecha', render: (row) => formatDate(row.expense_date) };
-    if (viewMode === 'pending') {
-      return [origen, tipo, monto, forma, cuenta, unidad, fecha];
-    }
     return [origen, tipo, monto, estado, forma, cuenta, unidad, fecha];
-  }, [viewMode]);
+  }, []);
+
+  const pendingDetailColumns = useMemo(() => {
+    const tipo = { header: 'Tipo de Gasto', accessor: 'expense_type' };
+    const monto = { header: 'Monto', render: (row) => formatCurrency(row.amount) };
+    const forma = {
+      header: 'Forma (chofer)',
+      render: (row) => row.driver_payment_method || '—'
+    };
+    const cuenta = { header: 'Cuenta', accessor: 'account_name' };
+    const unidad = { header: 'Unidad de Negocio', accessor: 'business_unit' };
+    const fecha = { header: 'Fecha', render: (row) => formatDate(row.expense_date) };
+    return [tipo, monto, forma, cuenta, unidad, fecha];
+  }, []);
 
   if (loading) return <Loading />;
 
@@ -355,6 +423,11 @@ const Expenses = () => {
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
+        {viewMode === 'all' && !tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Mostrando los 20 egresos más recientes
+          </p>
+        )}
         {tableSearch && (
           <p className="mt-2 text-sm text-gray-600">
             Mostrando {filteredExpenses.length} de {expenses.length} egresos
@@ -362,37 +435,77 @@ const Expenses = () => {
         )}
       </div>
 
-      <Table
-        columns={columns}
-        data={filteredExpenses}
-        onEdit={viewMode === 'pending' ? undefined : handleEdit}
-        onDelete={viewMode === 'pending' ? undefined : handleDelete}
-        customActions={
-          viewMode === 'pending'
-            ? (row) => (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => openValidateModal(row)}
-                    className="text-green-600 hover:text-green-900 font-medium px-2 py-1"
-                    title="Aprobar y asignar cuenta"
-                  >
-                    Validar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRejectRow(row)}
-                    className="text-red-600 hover:text-red-900 font-medium px-2 py-1"
-                    title="Rechazar"
-                  >
-                    Rechazar
-                  </button>
-                </>
-              )
-            : undefined
-        }
-        sortable
-      />
+      {filteredExpenses.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          No hay egresos que mostrar
+        </div>
+      ) : viewMode === 'all' ? (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <Table
+            columns={allViewColumns}
+            data={filteredExpenses}
+            sortable
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {groupedExpenseSections.map((section) => {
+            const first = section.rows[0];
+            const isContract = section.kind === 'contract';
+            return (
+              <div key={section.key} className="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-white">
+                <div className="bg-slate-100 border-b border-gray-200 px-4 py-3">
+                  {isContract && first?.contract_number ? (
+                    <>
+                      <p className="text-xs text-slate-500 uppercase tracking-wide">Contrato</p>
+                      <p className="text-xl font-bold text-gray-900">{first.contract_number}</p>
+                      <p className="text-sm text-slate-700 mt-1">
+                        {first.client_name || 'Cliente'}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        {first.contract_origin || '—'} → {first.contract_destination || '—'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-500 uppercase tracking-wide">Origen</p>
+                      <p className="text-base font-semibold text-gray-900">
+                        {getExpenseSource(first).label}
+                      </p>
+                    </>
+                  )}
+                </div>
+                <Table
+                  columns={pendingDetailColumns}
+                  data={section.rows}
+                  customActions={(row) => (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openValidateModal(row)}
+                        className="text-green-600 hover:text-green-900 font-medium px-2 py-1"
+                        title="Aprobar y asignar cuenta"
+                      >
+                        Validar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRejectRow(row)}
+                        className="text-red-600 hover:text-red-900 font-medium px-2 py-1"
+                        title="Rechazar"
+                      >
+                        Rechazar
+                      </button>
+                    </>
+                  )}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -504,11 +617,18 @@ const Expenses = () => {
         {validateModal && (
           <form onSubmit={handleValidateApprove} className="space-y-4">
             <p className="text-sm text-gray-600">
-              <strong>{validateModal.expense_type}</strong> ·{' '}
-              {formatCurrency(validateModal.amount)} · Contrato{' '}
-              {validateModal.contract_number || '—'}
+              <strong>{validateModal.expense_type}</strong> · {formatCurrency(validateModal.amount)}
             </p>
-            <p className="text-sm text-gray-600">
+            {validateModal.contract_number && (
+              <div className="mt-2 p-3 bg-slate-50 rounded-lg text-sm text-gray-700">
+                <p className="font-semibold text-gray-900">Contrato {validateModal.contract_number}</p>
+                <p>{validateModal.client_name || 'Cliente'}</p>
+                <p className="text-gray-500">
+                  {validateModal.contract_origin || '—'} → {validateModal.contract_destination || '—'}
+                </p>
+              </div>
+            )}
+            <p className="text-sm text-gray-600 mt-2">
               Forma reportada: <strong>{validateModal.driver_payment_method || '—'}</strong>
             </p>
             <FormSelect

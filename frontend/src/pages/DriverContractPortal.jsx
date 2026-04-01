@@ -21,10 +21,10 @@ const EXPENSE_TYPES = [
   { value: 'Nómina', label: 'Nómina / Sueldo' },
   { value: 'Casetas', label: 'Casetas' },
   { value: 'Combustible', label: 'Combustible' },
-  { value: 'Diesel', label: 'Diesel' },
   { value: 'TAG', label: 'TAG' },
   { value: 'Derecho Piso Aeropuerto', label: 'Derecho piso aeropuerto' },
-  { value: 'Resto efectivo', label: 'Resto efectivo RK / cambio' },
+  { value: 'Estacionamiento', label: 'Estacionamiento' },
+  { value: 'Hotel', label: 'Hotel' },
   { value: 'Otro', label: 'Otro (especificar en notas)' }
 ];
 

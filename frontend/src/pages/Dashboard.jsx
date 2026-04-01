@@ -4,7 +4,7 @@ import { getDashboardData } from '../services/api';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Users, FileCheck, FileText, DollarSign, Receipt, CreditCard } from 'lucide-react';
+import { Users, FileCheck, FileText, DollarSign, Receipt, CreditCard, Landmark } from 'lucide-react';
 
 const Dashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,6 +55,7 @@ const Dashboard = () => {
   const recentContracts = data?.recentContracts || [];
   const upcomingAssignments = data?.upcomingAssignments || [];
   const accountsByBusinessUnit = data?.accountsByBusinessUnit || [];
+  const accountsByBank = data?.accountsByBank || [];
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('es-MX', {
@@ -178,6 +179,48 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Saldo agrupado por banco / institución */}
+      {accountsByBank.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-1">Saldo por grupo (banco)</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Suma de todas las cuentas activas con el mismo banco. {accountsSubtitle}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {accountsByBank.map((group) => (
+              <div
+                key={group.bankName}
+                className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 flex flex-col gap-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="bg-blue-50 p-2 rounded-lg shrink-0">
+                      <Landmark className="text-blue-600" size={22} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 leading-tight truncate" title={group.bankName}>
+                        {group.bankName}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {group.accountCount} cuenta{group.accountCount === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <p
+                  className={`text-2xl font-bold tabular-nums ${
+                    group.totalBalance >= 0 ? 'text-emerald-700' : 'text-red-600'
+                  }`}
+                >
+                  {formatCurrency(group.totalBalance)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Cuentas por Unidad de Negocio */}
       {accountsByBusinessUnit.length > 0 && (
         <div className="mb-8">
@@ -240,6 +283,9 @@ const Dashboard = () => {
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                         contract.status === 'Agendado' ? 'bg-green-100 text-green-800' :
                         contract.status === 'Realizado' ? 'bg-blue-100 text-blue-800' :
+                        contract.status === 'Por cobrar' ? 'bg-amber-100 text-amber-900' :
+                        contract.status === 'Por pagar' ? 'bg-orange-100 text-orange-900' :
+                        contract.status === 'En proceso' ? 'bg-yellow-100 text-yellow-900' :
                         'bg-red-100 text-red-800'
                       }`}>
                         {contract.status}

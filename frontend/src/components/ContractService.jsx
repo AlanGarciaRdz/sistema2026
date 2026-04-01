@@ -54,7 +54,7 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
     const [unitType,     setUnitType]     = useState(UNIT_TYPES[2]);
     const [total,        setTotal]        = useState('');
     const [notes,        setNotes]        = useState('');
-    const [status,       setStatus]       = useState('scheduled');  // scheduled, in_progress, complete
+    const [status,       setStatus]       = useState('scheduled');  // scheduled, in_progress, complete, pending_collect, pending_pay
 
     // ── contrato-only ──
     const [departure,     setDeparture]     = useState('');
@@ -576,6 +576,8 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
                 <option value="scheduled">Programado</option>
                 <option value="in_progress">En curso</option>
                 <option value="complete">Completado</option>
+                <option value="pending_collect">Por cobrar</option>
+                <option value="pending_pay">Por pagar</option>
               </select>
             </div>
 

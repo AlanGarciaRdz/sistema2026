@@ -36,6 +36,7 @@ app.use('/api/vehicles', vehiclesRoutes);
 app.use('/api/assignments', assignmentsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
+// Público para choferes (sin sesión); la app del panel usa login en el frontend.
 app.use('/api/driver-portal', driverPortalRoutes);
 
 // Health check endpoint

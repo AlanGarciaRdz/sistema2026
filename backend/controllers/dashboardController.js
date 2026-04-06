@@ -22,18 +22,24 @@ const getDashboardData = async (req, res) => {
     
     // Get total revenue: current month if no range, else by date range
     const revenueQuery = hasDateRange
-      ? `SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE payment_date >= $1 AND payment_date <= $2`
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM payments
+         WHERE payment_date >= $1 AND payment_date <= $2
+           AND COALESCE(payment_type, '') <> 'Transferencia interna'`
       : `SELECT COALESCE(SUM(amount), 0) as total FROM payments
          WHERE EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-           AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)`;
+           AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+           AND COALESCE(payment_type, '') <> 'Transferencia interna'`;
     const revenueResult = await pool.query(revenueQuery, dateParams);
 
-    // Get total expenses: same logic
+    // Get total expenses: same logic (excluye traspasos entre cuentas)
     const expensesQuery = hasDateRange
-      ? `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE expense_date >= $1 AND expense_date <= $2`
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM expenses
+         WHERE expense_date >= $1 AND expense_date <= $2
+           AND COALESCE(expense_type, '') <> 'Transferencia entre cuentas'`
       : `SELECT COALESCE(SUM(amount), 0) as total FROM expenses
          WHERE EXTRACT(MONTH FROM expense_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-           AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)`;
+           AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+           AND COALESCE(expense_type, '') <> 'Transferencia entre cuentas'`;
     const expensesResult = await pool.query(expensesQuery, dateParams);
 
     // Accounts by business unit: all-time if no range, else filter by date range

@@ -1,4 +1,8 @@
 const pool = require('../config/db');
+const {
+  EXPENSE_TYPE_INTERNAL,
+  deletePairPaymentForExpense
+} = require('../utils/accountTransfers');
 
 // Get all expenses (?validation_status=pending|approved|rejected)
 const getAllExpenses = async (req, res) => {
@@ -187,13 +191,21 @@ const updateExpense = async (req, res) => {
 const deleteExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const result = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING *', [id]);
-    
-    if (result.rows.length === 0) {
+
+    const sel = await pool.query(
+      'SELECT id, notes, expense_type FROM expenses WHERE id = $1',
+      [id]
+    );
+    if (sel.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Expense not found' });
     }
-    
+    const row = sel.rows[0];
+    if (row.expense_type === EXPENSE_TYPE_INTERNAL) {
+      await deletePairPaymentForExpense(row.notes);
+    }
+
+    await pool.query('DELETE FROM expenses WHERE id = $1', [id]);
+
     res.json({ success: true, message: 'Expense deleted successfully' });
   } catch (error) {
     console.error('Error deleting expense:', error);

@@ -1,4 +1,10 @@
+const { randomUUID } = require('crypto');
 const pool = require('../config/db');
+const {
+  PAYMENT_TYPE_INTERNAL,
+  EXPENSE_TYPE_INTERNAL,
+  deletePairExpenseForPayment
+} = require('../utils/accountTransfers');
 
 // Get all payments
 const getAllPayments = async (req, res) => {
@@ -144,17 +150,109 @@ const updatePayment = async (req, res) => {
   }
 };
 
+// Transferencia entre cuentas: egreso en origen + ingreso en destino (mismo monto, vinculados)
+const createAccountTransfer = async (req, res) => {
+  const { from_account_id, to_account_id, amount, transfer_date, note } = req.body;
+  const fromId = parseInt(from_account_id, 10);
+  const toId = parseInt(to_account_id, 10);
+  const amt = parseFloat(amount);
+
+  if (!Number.isFinite(fromId) || !Number.isFinite(toId) || fromId === toId) {
+    return res.status(400).json({ success: false, error: 'Seleccione dos cuentas distintas' });
+  }
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return res.status(400).json({ success: false, error: 'Monto inválido' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const accRows = await client.query(
+      `SELECT id, business_unit, account_name, bank_name FROM payment_accounts WHERE id IN ($1, $2)`,
+      [fromId, toId]
+    );
+    if (accRows.rows.length !== 2) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, error: 'Una o ambas cuentas no existen' });
+    }
+
+    const fromAcc = accRows.rows.find((r) => r.id === fromId);
+    const toAcc = accRows.rows.find((r) => r.id === toId);
+    const pairId = randomUUID();
+    const dateStr = transfer_date || new Date().toISOString().slice(0, 10);
+
+    const baseMeta = note && String(note).trim()
+      ? { user_note: String(note).trim() }
+      : {};
+
+    const expenseNotes = JSON.stringify({
+      transfer_pair_id: pairId,
+      transfer_to_account_id: toId,
+      transfer_to_name: toAcc.account_name,
+      ...baseMeta
+    });
+    const paymentNotes = JSON.stringify({
+      transfer_pair_id: pairId,
+      transfer_from_account_id: fromId,
+      transfer_from_name: fromAcc.account_name,
+      ...baseMeta
+    });
+
+    const biz = fromAcc.business_unit || null;
+
+    await client.query(
+      `INSERT INTO expenses (
+        contract_id, expense_type, amount, payment_account_id,
+        business_unit, expense_date, notes, validation_status, driver_payment_method
+      ) VALUES (NULL, $1, $2, $3, $4, $5, $6, 'approved', NULL)`,
+      [EXPENSE_TYPE_INTERNAL, amt, fromId, biz, dateStr, expenseNotes]
+    );
+
+    await client.query(
+      `INSERT INTO payments (
+        contract_id, contract_number, payment_type, amount, payment_method,
+        payment_account_id, payment_date, invoice_number, iva_amount, notes
+      ) VALUES (NULL, NULL, $1, $2, $3, $4, $5, NULL, NULL, $6)`,
+      [PAYMENT_TYPE_INTERNAL, amt, 'Transferencia', toId, dateStr, paymentNotes]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      success: true,
+      message: 'Transferencia registrada',
+      data: { transfer_pair_id: pairId }
+    });
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.error('Error creating account transfer:', error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+};
+
 // Delete payment
 const deletePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const result = await pool.query('DELETE FROM payments WHERE id = $1 RETURNING *', [id]);
-    
-    if (result.rows.length === 0) {
+
+    const sel = await pool.query(
+      'SELECT id, notes, payment_type FROM payments WHERE id = $1',
+      [id]
+    );
+    if (sel.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Payment not found' });
     }
-    
+    const row = sel.rows[0];
+    if (row.payment_type === PAYMENT_TYPE_INTERNAL) {
+      await deletePairExpenseForPayment(row.notes);
+    }
+
+    await pool.query('DELETE FROM payments WHERE id = $1', [id]);
+
     res.json({ success: true, message: 'Payment deleted successfully' });
   } catch (error) {
     console.error('Error deleting payment:', error);
@@ -167,6 +265,7 @@ module.exports = {
   getPaymentById,
   getPaymentsByContractNumber,
   createPayment,
+  createAccountTransfer,
   updatePayment,
   deletePayment
 };

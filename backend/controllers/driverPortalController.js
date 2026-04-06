@@ -1,3 +1,8 @@
+/**
+ * API del portal del chofer: sin autenticación por usuario/contraseña.
+ * El acceso se limita por número de contrato en la URL; no añadir middleware de login aquí
+ * salvo que se diseñe otro mecanismo (token por contrato, etc.).
+ */
 const pool = require('../config/db');
 
 const PAYMENT_METHODS = ['Efectivo', 'Depósito', 'Transferencia'];

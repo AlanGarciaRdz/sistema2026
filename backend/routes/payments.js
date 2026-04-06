@@ -5,11 +5,13 @@ const {
   getPaymentById,
   getPaymentsByContractNumber,
   createPayment,
+  createAccountTransfer,
   updatePayment,
   deletePayment
 } = require('../controllers/paymentsController');
 
 router.get('/', getAllPayments);
+router.post('/transfer', createAccountTransfer);
 router.get('/contract/:contract_number', getPaymentsByContractNumber);
 router.get('/:id', getPaymentById);
 router.post('/', createPayment);

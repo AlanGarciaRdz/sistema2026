@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import Sidebar from './components/Sidebar';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
 import Quotes from './pages/Quotes';
@@ -38,25 +41,31 @@ function MainLayout() {
 
 function App() {
   return (
-    <Router basename="/sistema">
-      <Routes>
-        <Route path="/c/:contractNumber" element={<DriverContractPortal />} />
-        <Route path="/" element={<MainLayout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="clients" element={<Clients />} />
-          <Route path="quotes" element={<Quotes />} />
-          <Route path="contracts" element={<Contracts />} />
-          <Route path="payments" element={<Payments />} />
-          <Route path="expenses" element={<Expenses />} />
-          <Route path="drivers" element={<Drivers />} />
-          <Route path="vehicles" element={<Vehicles />} />
-          <Route path="assignments" element={<Assignments />} />
-          <Route path="trips" element={<Trips />} />
-          <Route path="payment-accounts" element={<PaymentAccounts />} />
-          <Route path="maintenance" element={<Maintenance />} />
-        </Route>
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router basename="/sistema">
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          {/* Portal chofer: sin login (acceso por número de contrato en la URL). No mover dentro de ProtectedRoute. */}
+          <Route path="/c/:contractNumber" element={<DriverContractPortal />} />
+          <Route element={<ProtectedRoute />}>
+            <Route element={<MainLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="quotes" element={<Quotes />} />
+              <Route path="contracts" element={<Contracts />} />
+              <Route path="payments" element={<Payments />} />
+              <Route path="expenses" element={<Expenses />} />
+              <Route path="drivers" element={<Drivers />} />
+              <Route path="vehicles" element={<Vehicles />} />
+              <Route path="assignments" element={<Assignments />} />
+              <Route path="trips" element={<Trips />} />
+              <Route path="payment-accounts" element={<PaymentAccounts />} />
+              <Route path="maintenance" element={<Maintenance />} />
+            </Route>
+          </Route>
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 

@@ -16,6 +16,7 @@ import FormSelect from '../components/FormSelect';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
+import { matchesAmountSearch } from '../utils/matchesAmountSearch';
 
 const EXPENSE_TYPES = [
   { value: 'Agua', label: 'Agua' },
@@ -196,7 +197,11 @@ const Expenses = () => {
   };
 
   const handleDelete = async (expense) => {
-    if (window.confirm('¿Está seguro de eliminar este gasto?')) {
+    const msg =
+      expense.expense_type === 'Transferencia entre cuentas'
+        ? '¿Eliminar este traspaso? También se eliminará el ingreso vinculado en la cuenta destino.'
+        : '¿Está seguro de eliminar este gasto?';
+    if (window.confirm(msg)) {
       try {
         await deleteExpense(expense.id);
         setToast({ message: 'Gasto eliminado exitosamente', type: 'success' });
@@ -263,6 +268,7 @@ const Expenses = () => {
     if (!tableSearch.trim()) return expenses;
     const q = tableSearch.toLowerCase().trim();
     return expenses.filter((row) => {
+      if (matchesAmountSearch(tableSearch.trim(), row.amount)) return true;
       const source = getExpenseSource(row);
       if (source.type === 'contract') {
         const contract = contracts.find((c) => c.id === row.contract_id);
@@ -418,7 +424,7 @@ const Expenses = () => {
       <div className="mb-4">
         <input
           type="text"
-          placeholder="Buscar por número de contrato o nombre del cliente..."
+          placeholder="Contrato, cliente, origen o monto (ej. 500 o 1200.50)..."
           value={tableSearch}
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"

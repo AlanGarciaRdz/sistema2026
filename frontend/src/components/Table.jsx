@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Edit, Trash2, Eye, ChevronUp, ChevronDown } from 'lucide-react';
 
-const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortable }) => {
+const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortable, canEditRow }) => {
   const hasActions = onView || onEdit || onDelete || customActions;
   const [sortKey, setSortKey] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
@@ -68,7 +68,7 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                       <Eye size={17} />
                     </button>
                   )}
-                  {onEdit && (
+                  {onEdit && (!canEditRow || canEditRow(row)) && (
                     <button onClick={() => onEdit(row)} className="text-green-600 hover:text-green-900 p-2 rounded-lg hover:bg-green-100 transition-colors" title="Editar">
                       <Edit size={17} />
                     </button>
@@ -145,7 +145,7 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                             <Eye size={18} />
                           </button>
                         )}
-                        {onEdit && (
+                        {onEdit && (!canEditRow || canEditRow(row)) && (
                           <button onClick={() => onEdit(row)} className="text-green-600 hover:text-green-900 transition-colors p-1" title="Editar">
                             <Edit size={18} />
                           </button>

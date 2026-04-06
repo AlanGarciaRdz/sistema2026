@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { getPayments, deletePayment, createPayment, updatePayment, getQuotes, getContracts, getPaymentAccounts } from '../services/api';
+import {
+  getPayments,
+  deletePayment,
+  createPayment,
+  createAccountTransfer,
+  updatePayment,
+  getQuotes,
+  getContracts,
+  getPaymentAccounts
+} from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
@@ -9,13 +18,22 @@ import Button from '../components/Button';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import jsPDF from 'jspdf';
-import { FileDown } from 'lucide-react';
+import { FileDown, ArrowLeftRight } from 'lucide-react';
+import { matchesAmountSearch } from '../utils/matchesAmountSearch';
 
 const Payments = () => {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferForm, setTransferForm] = useState({
+    fromAccountId: '',
+    toAccountId: '',
+    amount: '',
+    transferDate: new Date().toISOString().split('T')[0],
+    note: ''
+  });
   const [editingPayment, setEditingPayment] = useState(null);
   const [quotes, setQuotes] = useState([]);
   const [contracts, setContracts] = useState([]);
@@ -80,8 +98,56 @@ const Payments = () => {
     }
   };
 
+  const openTransferModal = () => {
+    setTransferForm({
+      fromAccountId: '',
+      toAccountId: '',
+      amount: '',
+      transferDate: new Date().toISOString().split('T')[0],
+      note: ''
+    });
+    setIsTransferModalOpen(true);
+  };
+
+  const handleSubmitTransfer = async (e) => {
+    e.preventDefault();
+    const fromId = parseInt(transferForm.fromAccountId, 10);
+    const toId = parseInt(transferForm.toAccountId, 10);
+    if (!fromId || !toId || fromId === toId) {
+      setToast({ message: 'Seleccione dos cuentas distintas', type: 'error' });
+      return;
+    }
+    const amt = parseFloat(transferForm.amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setToast({ message: 'Indique un monto válido', type: 'error' });
+      return;
+    }
+    try {
+      await createAccountTransfer({
+        from_account_id: fromId,
+        to_account_id: toId,
+        amount: amt,
+        transfer_date: transferForm.transferDate,
+        note: transferForm.note || null
+      });
+      setToast({ message: 'Transferencia registrada (egreso en origen, ingreso en destino)', type: 'success' });
+      setIsTransferModalOpen(false);
+      fetchPayments();
+    } catch (error) {
+      console.error('Error transfer:', error);
+      setToast({
+        message: error.response?.data?.error || 'Error al registrar transferencia',
+        type: 'error'
+      });
+    }
+  };
+
   const handleDelete = async (payment) => {
-    if (window.confirm('¿Está seguro de eliminar este pago?')) {
+    const msg =
+      payment.payment_type === 'Transferencia interna'
+        ? '¿Eliminar esta transferencia? También se eliminará el egreso vinculado en la cuenta origen.'
+        : '¿Está seguro de eliminar este pago?';
+    if (window.confirm(msg)) {
       try {
         await deletePayment(payment.id);
         setToast({ message: 'Pago eliminado exitosamente', type: 'success' });
@@ -359,10 +425,28 @@ const Payments = () => {
     if (!tableSearch.trim()) return payments;
     const q = tableSearch.toLowerCase().trim();
     return payments.filter((p) => {
+      if (matchesAmountSearch(tableSearch.trim(), p.amount)) return true;
+
       let notesData = {};
       try {
         notesData = JSON.parse(p.notes || '{}');
       } catch {}
+
+      if (p.payment_type === 'Transferencia interna') {
+        try {
+          const n = JSON.parse(p.notes || '{}');
+          const fromLabel = (n.transfer_from_name || '').toLowerCase();
+          const fromAcc = accounts.find((a) => a.id === n.transfer_from_account_id);
+          const fromSearch = (fromAcc?.account_name || fromLabel || '').toLowerCase();
+          return (
+            q.includes('transfer') ||
+            q.includes('traspaso') ||
+            fromSearch.includes(q)
+          );
+        } catch {
+          return q.includes('transfer') || q.includes('traspaso');
+        }
+      }
 
       if (notesData.quote_id) {
         const quote = quotes.find((qu) => qu.id === parseInt(notesData.quote_id, 10));
@@ -392,12 +476,38 @@ const Payments = () => {
         clientName.toLowerCase().includes(q)
       );
     });
-  }, [payments, tableSearch, quotes, contracts]);
+  }, [payments, tableSearch, quotes, contracts, accounts]);
 
   const columns = [
         { 
       header: 'Contrato', 
       render: (row) => {
+        if (row.payment_type === 'Transferencia interna') {
+          let n = {};
+          try {
+            n = JSON.parse(row.notes || '{}');
+          } catch {}
+          const fromName =
+            n.transfer_from_name ||
+            accounts.find((a) => a.id === n.transfer_from_account_id)?.account_name ||
+            '—';
+          const toName =
+            n.transfer_to_name ||
+            accounts.find((a) => a.id === row.payment_account_id)?.account_name ||
+            row.account_name ||
+            '—';
+          return (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-medium text-indigo-800">Traspaso entre cuentas</span>
+              <span className="text-xs text-gray-600">
+                Desde: {fromName} → Hacia: {toName}
+              </span>
+              {n.user_note && (
+                <span className="text-xs text-gray-500 italic">{n.user_note}</span>
+              )}
+            </div>
+          );
+        }
         try {
           const notesData = JSON.parse(row.notes || '{}');
           if (notesData.quote_id) {
@@ -414,7 +524,7 @@ const Payments = () => {
             );
           }
         } catch {}
-        if (!row.contract_id) {
+        if (!row.contract_id && row.payment_type !== 'Transferencia interna') {
           return (
             <div className="flex flex-col gap-0.5">
               <span className="font-medium text-gray-700">Otro ingreso</span>
@@ -469,18 +579,26 @@ const Payments = () => {
 
   if (loading) return <Loading />;
 
+  const accountSelectOptions = accounts.map((account) => ({
+    value: account.id,
+    label: `${account.account_name} (${account.bank_name || '—'})`
+  }));
+
   return (
     <div className="p-6">
-      <Header 
-        title="Ingresos" 
-        buttonText="+ Registrar Ingreso"
-        onButtonClick={handleOpenModal}
-      />
+      <Header title="Ingresos" buttonText="+ Registrar Ingreso" onButtonClick={handleOpenModal}>
+        <Button type="button" variant="secondary" onClick={openTransferModal}>
+          <span className="inline-flex items-center gap-2">
+            <ArrowLeftRight size={18} />
+            Transferencia entre cuentas
+          </span>
+        </Button>
+      </Header>
 
       <div className="mb-4">
         <input
           type="text"
-          placeholder="Buscar por número de contrato o nombre del cliente..."
+          placeholder="Contrato, cliente, transferencia o monto (ej. 1500 o 1500.50)..."
           value={tableSearch}
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -496,6 +614,7 @@ const Payments = () => {
         columns={columns}
         data={filteredPayments}
         onEdit={handleEdit}
+        canEditRow={(row) => row.payment_type !== 'Transferencia interna'}
         onDelete={handleDelete}
       />
 
@@ -701,6 +820,80 @@ const Payments = () => {
             </Button>
             <Button type="submit" variant="success">
               {editingPayment ? '💾 Actualizar y Generar Recibo' : '💾 Guardar y Generar Recibo'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        title="Transferencia entre cuentas"
+        size="md"
+      >
+        <form onSubmit={handleSubmitTransfer} className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Registra un traspaso: se descuenta el monto de la cuenta origen y se abona en la
+            destino. No cuenta como ingreso de operación en el dashboard (solo mueve saldo entre
+            cuentas). También aparece un egreso en Egresos vinculado a la misma operación.
+          </p>
+          <FormSelect
+            label="Cuenta origen (sale el dinero)"
+            value={transferForm.fromAccountId}
+            onChange={(e) =>
+              setTransferForm({ ...transferForm, fromAccountId: e.target.value })
+            }
+            options={accountSelectOptions}
+            required
+          />
+          <FormSelect
+            label="Cuenta destino (entra el dinero)"
+            value={transferForm.toAccountId}
+            onChange={(e) =>
+              setTransferForm({ ...transferForm, toAccountId: e.target.value })
+            }
+            options={accountSelectOptions}
+            required
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <FormInput
+              label="Monto"
+              type="number"
+              step="0.01"
+              value={transferForm.amount}
+              onChange={(e) =>
+                setTransferForm({ ...transferForm, amount: e.target.value })
+              }
+              required
+            />
+            <FormInput
+              label="Fecha"
+              type="date"
+              value={transferForm.transferDate}
+              onChange={(e) =>
+                setTransferForm({ ...transferForm, transferDate: e.target.value })
+              }
+              required
+            />
+          </div>
+          <FormInput
+            label="Nota (opcional)"
+            value={transferForm.note}
+            onChange={(e) =>
+              setTransferForm({ ...transferForm, note: e.target.value })
+            }
+            placeholder="Ej. Préstamo entre cuentas BANAMEX"
+          />
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsTransferModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary">
+              Registrar transferencia
             </Button>
           </div>
         </form>

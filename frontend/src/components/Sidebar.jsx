@@ -15,12 +15,22 @@ import {
   Menu,
   X,
   PanelLeftClose,
-  PanelLeft
+  PanelLeft,
+  LogOut
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isCollapsed = false, onToggleCollapse }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -118,6 +128,16 @@ const Sidebar = ({ isCollapsed = false, onToggleCollapse }) => {
               })}
             </ul>
           </nav>
+          <div className="mt-10 pt-6 border-t border-slate-700">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-gray-300 hover:bg-slate-700 hover:text-white transition-colors text-left"
+            >
+              <LogOut size={20} />
+              <span>Cerrar sesión</span>
+            </button>
+          </div>
         </div>
       </aside>
     </>

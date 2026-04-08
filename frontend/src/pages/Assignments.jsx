@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   getAssignments,
   deleteAssignment,
@@ -28,6 +28,7 @@ const Assignments = () => {
   const [selectedContract, setSelectedContract] = useState(null);
   const [contractUnitType, setContractUnitType] = useState('');
   const [editingAssignment, setEditingAssignment] = useState(null);
+  const [contractSearch, setContractSearch] = useState('');
   const [formData, setFormData] = useState({
     contract_id: '',
     driver_id: '',
@@ -106,7 +107,38 @@ const Assignments = () => {
     setSelectedContract(null);
     setContractUnitType('');
     setEditingAssignment(null);
+    setContractSearch('');
   };
+
+  const sortedContracts = useMemo(
+    () =>
+      contracts
+        .slice()
+        .sort((a, b) =>
+          String(a.contract_number || '').localeCompare(String(b.contract_number || ''), 'es', {
+            numeric: true
+          })
+        ),
+    [contracts]
+  );
+
+  /** Búsqueda por id numérico, número de contrato o cliente; el contrato ya elegido siempre aparece. */
+  const filteredContractsForSelect = useMemo(() => {
+    const q = contractSearch.trim().toLowerCase();
+    if (!q) return sortedContracts;
+    return sortedContracts.filter((c) => {
+      if (formData.contract_id && String(c.id) === String(formData.contract_id)) return true;
+      const idStr = String(c.id);
+      const numStr = String(c.contract_number || '').toLowerCase();
+      const client = (c.client_name || '').toLowerCase();
+      return (
+        idStr === q ||
+        idStr.includes(q) ||
+        numStr.includes(q) ||
+        client.includes(q)
+      );
+    });
+  }, [sortedContracts, contractSearch, formData.contract_id]);
 
   const handleOpenModal = async () => {
     resetModalState();
@@ -172,6 +204,14 @@ const Assignments = () => {
       driving_date: assignment.driving_date ? String(assignment.driving_date).slice(0, 10) : '',
       notes: assignment.notes || ''
     });
+
+    setContractSearch(
+      contract
+        ? `${contract.id} ${contract.contract_number || ''}`.trim()
+        : assignment.contract_id
+          ? String(assignment.contract_id)
+          : ''
+    );
 
     setIsModalOpen(true);
   };
@@ -256,22 +296,34 @@ const Assignments = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Contrato <span className="text-red-500">*</span>
             </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Busca por <strong>ID</strong> del contrato, número de folio o nombre del cliente.
+            </p>
+            <input
+              type="text"
+              placeholder="Ej: 42 o 2603311033 o nombre del cliente..."
+              value={contractSearch}
+              onChange={(e) => setContractSearch(e.target.value)}
+              className="w-full mb-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
             <select
               value={formData.contract_id}
               onChange={handleContractChange}
               required
               className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              <option value="">Seleccionar...</option>
-              {contracts
-                .slice()
-                .sort((a, b) => String(a.contract_number || '').localeCompare(String(b.contract_number || '')))
-                .map((contract) => (
-                  <option key={contract.id} value={contract.id}>
-                    #{contract.contract_number || contract.id} · {contract.client_name || 'Sin cliente'}
-                  </option>
-                ))}
+              <option value="">Seleccionar contrato de la lista…</option>
+              {filteredContractsForSelect.map((contract) => (
+                <option key={contract.id} value={contract.id}>
+                  ID {contract.id} · #{contract.contract_number || '—'} · {contract.client_name || 'Sin cliente'}
+                </option>
+              ))}
             </select>
+            {contractSearch.trim() && filteredContractsForSelect.length === 0 && (
+              <p className="mt-1 text-sm text-amber-600">
+                No hay contratos que coincidan. Prueba con el ID exacto, el número de contrato o borra el filtro.
+              </p>
+            )}
           </div>
 
           {selectedContract && (

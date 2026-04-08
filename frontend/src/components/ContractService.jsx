@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { getClients, getVehicles } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
@@ -24,7 +25,13 @@ const UNIT_TYPES = [
     return `${year}${month}${day}${hour}${minute}`;
   };
 
-const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
+const ContractService = ({
+  isOpen,
+  onClose,
+  onSave,
+  editingContract,
+  assignedDriverNames = []
+}) => {
 
     // ── mode & folio ──
     const [mode, setMode] = useState('contrato');
@@ -580,6 +587,34 @@ const ContractService = ({ isOpen, onClose, onSave, editingContract }) => {
                 <option value="pending_pay">Por pagar</option>
               </select>
             </div>
+
+            {editingContract && assignedDriverNames.length > 0 && (
+              <div className="col-span-2 flex flex-col gap-1.5 rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2.5">
+                <span className="text-xs font-medium text-violet-900">
+                  Choferes asignados (desde Asignaciones)
+                </span>
+                <ul className="text-sm text-violet-950 list-disc list-inside space-y-0.5">
+                  {assignedDriverNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+                <Link
+                  to="/assignments"
+                  className="text-xs font-medium text-violet-700 hover:text-violet-900 underline underline-offset-2"
+                >
+                  Gestionar en Asignaciones →
+                </Link>
+              </div>
+            )}
+            {editingContract && assignedDriverNames.length === 0 && (
+              <div className="col-span-2 text-xs text-gray-500">
+                Chofer / unidad operativa: créalo en{' '}
+                <Link to="/assignments" className="text-violet-700 font-medium hover:underline">
+                  Asignaciones
+                </Link>
+                .
+              </div>
+            )}
 
           </div>
 

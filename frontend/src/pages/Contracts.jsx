@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ContractService from '../components/ContractService';
-import { getContracts, deleteContract, createContract, updateContract, getPayments, getExpenses } from '../services/api';
+import {
+  getContracts,
+  deleteContract,
+  createContract,
+  updateContract,
+  getPayments,
+  getExpenses,
+  getAssignments
+} from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import { Link } from 'react-router-dom';
-import { FileDown, Copy, Eye, Link2, Share2 } from 'lucide-react';
+import { FileDown, Copy, Eye, Link2, Share2, User } from 'lucide-react';
 import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
 import TripSummaryModal from '../components/TripSummaryModal';
 
@@ -36,6 +44,7 @@ const Contracts = () => {
   const [contracts, setContracts] = useState([]);
   const [payments, setPayments] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isContratoServicioOpen, setIsContratoServicioOpen] = useState(false);
@@ -47,13 +56,24 @@ const Contracts = () => {
   const [filterNoContrato, setFilterNoContrato] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
   const [filterDestino, setFilterDestino] = useState('');
+  const [filterChofer, setFilterChofer] = useState('');
   const [summaryRow, setSummaryRow] = useState(null);
 
   useEffect(() => {
     fetchContracts();
     fetchPayments();
     fetchExpenses();
+    fetchAssignments();
   }, []);
+
+  const fetchAssignments = async () => {
+    try {
+      const response = await getAssignments();
+      setAssignments(response.data.data || []);
+    } catch (err) {
+      console.error('Error fetching assignments:', err);
+    }
+  };
 
   const fetchExpenses = async () => {
     try {
@@ -141,6 +161,7 @@ const Contracts = () => {
       setEditingContract(null);
       setIsContratoServicioOpen(false);
       fetchContracts();
+      fetchAssignments();
     } catch (error) {
       console.error('Error saving contract:', error);
       setToast({ message: 'Error al guardar contrato', type: 'error' });
@@ -260,6 +281,7 @@ const Contracts = () => {
         await deleteContract(contract.id);
         setToast({ message: 'Contrato eliminado exitosamente', type: 'success' });
         fetchContracts();
+        fetchAssignments();
       } catch (error) {
         setToast({ message: 'Error al eliminar contrato', type: 'error' });
       }
@@ -285,6 +307,34 @@ const Contracts = () => {
     } catch { return '-'; }
   };
 
+  const driverNamesByContractId = useMemo(() => {
+    const m = new Map();
+    for (const a of assignments) {
+      const cid = a.contract_id;
+      if (cid == null || !a.driver_name) continue;
+      const arr = m.get(cid) || [];
+      if (!arr.includes(a.driver_name)) arr.push(a.driver_name);
+      m.set(cid, arr);
+    }
+    for (const arr of m.values()) {
+      arr.sort((x, y) => x.localeCompare(y, 'es'));
+    }
+    return m;
+  }, [assignments]);
+
+  const getAssignedDriverNames = (row) => {
+    const fromAssign = driverNamesByContractId.get(row.id) || [];
+    let notesData = {};
+    try {
+      notesData = row.notes ? JSON.parse(row.notes) : {};
+    } catch {}
+    const n = notesData?.assignment?.driver_name;
+    if (n && !fromAssign.includes(n)) {
+      return [...fromAssign, n].sort((a, b) => a.localeCompare(b, 'es'));
+    }
+    return fromAssign;
+  };
+
   const filteredContracts = useMemo(() => {
     return contracts.filter((row) => {
       const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
@@ -304,9 +354,24 @@ const Contracts = () => {
         const d = (row.destination || '').toLowerCase();
         if (!d.includes(filterDestino.toLowerCase())) return false;
       }
+      if (filterChofer.trim()) {
+        const q = filterChofer.toLowerCase().trim();
+        const names = getAssignedDriverNames(row);
+        if (!names.some((name) => name.toLowerCase().includes(q))) return false;
+      }
       return true;
     });
-  }, [contracts, filterFechaInicio, filterFechaFin, filterCliente, filterNoContrato, filterEstado, filterDestino]);
+  }, [
+    contracts,
+    filterFechaInicio,
+    filterFechaFin,
+    filterCliente,
+    filterNoContrato,
+    filterEstado,
+    filterDestino,
+    filterChofer,
+    assignments
+  ]);
 
   const getPaidAmount = (contractId) => {
     return (payments || [])
@@ -344,14 +409,29 @@ const Contracts = () => {
   const columns = [
     {
       header: 'No. Contrato',
-      width: '120px',
+      width: '140px',
+      wrap: true,
       render: (row) => {
         const unit = getAssignedUnit(row);
+        const drivers = getAssignedDriverNames(row);
         return (
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">{row.contract_number}</span>
             <span className="text-xs text-gray-500">{getUnitType(row)}</span>
             {unit && <span className="text-xs text-blue-600 font-medium">{unit}</span>}
+            {drivers.length > 0 && (
+              <div className="flex flex-col gap-0.5 mt-0.5 pt-0.5 border-t border-gray-100">
+                {drivers.map((name) => (
+                  <span
+                    key={name}
+                    className="text-xs text-violet-800 flex items-start gap-1 leading-snug"
+                  >
+                    <User size={12} className="shrink-0 mt-0.5 opacity-80" aria-hidden />
+                    <span>{name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         );
       }
@@ -446,7 +526,7 @@ const Contracts = () => {
 
       <div className="mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200">
         <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Filtros</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha inicio</label>
             <input
@@ -507,6 +587,16 @@ const Contracts = () => {
               placeholder="Buscar..."
               value={filterDestino}
               onChange={(e) => setFilterDestino(e.target.value)}
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Chofer</label>
+            <input
+              type="text"
+              placeholder="Nombre del chofer..."
+              value={filterChofer}
+              onChange={(e) => setFilterChofer(e.target.value)}
               className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
@@ -571,6 +661,13 @@ const Contracts = () => {
         }}
         onSave={handleSaveContract}
         editingContract={editingContract}
+        assignedDriverNames={
+          editingContract?.id
+            ? getAssignedDriverNames(
+                contracts.find((c) => c.id === editingContract.id) || { id: editingContract.id, notes: null }
+              )
+            : []
+        }
       />
       <TripSummaryModal
         isOpen={!!summaryRow}

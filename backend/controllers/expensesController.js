@@ -4,10 +4,24 @@ const {
   deletePairPaymentForExpense
 } = require('../utils/accountTransfers');
 
-// Get all expenses (?validation_status=pending|approved|rejected)
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+// Get all expenses (?validation_status=pending|approved|rejected&start=&end=&limit=)
 const getAllExpenses = async (req, res) => {
   try {
-    const { validation_status, limit } = req.query;
+    const { validation_status, limit, start, end } = req.query;
+    let rangeStart =
+      start && DATE_ONLY.test(String(start).trim()) ? String(start).trim() : null;
+    let rangeEnd =
+      end && DATE_ONLY.test(String(end).trim()) ? String(end).trim() : null;
+    if (rangeStart && rangeEnd && rangeStart > rangeEnd) {
+      const t = rangeStart;
+      rangeStart = rangeEnd;
+      rangeEnd = t;
+    }
+    const hasDateRange = Boolean(rangeStart && rangeEnd);
+    console.log('hasDateRange', hasDateRange);
+
     let sql = `
       SELECT e.*, co.contract_number,
         co.origin AS contract_origin, co.destination AS contract_destination,
@@ -18,16 +32,35 @@ const getAllExpenses = async (req, res) => {
       LEFT JOIN payment_accounts pa ON e.payment_account_id = pa.id
     `;
     const params = [];
+    const conditions = [];
+
     if (validation_status) {
       params.push(validation_status);
-      sql += ` WHERE e.validation_status = $${params.length}`;
+      conditions.push(`e.validation_status = $${params.length}`);
+    }
+    if (hasDateRange) {
+      params.push(rangeStart, rangeEnd);
+      conditions.push(
+        `e.expense_date >= $${params.length - 1}::date AND e.expense_date <= $${params.length}::date`
+      );
+    }
+
+    if (conditions.length) {
+      sql += ` WHERE ${conditions.join(' AND ')}`;
     }
     sql += ' ORDER BY e.expense_date DESC, e.id DESC';
-    const lim = parseInt(limit, 10);
-    if (!Number.isNaN(lim) && lim > 0 && lim <= 500) {
+
+    let lim = parseInt(limit, 10);
+    if (hasDateRange) {
+      if (Number.isNaN(lim) || lim <= 0) lim = 2000;
+      lim = Math.min(Math.max(lim, 1), 5000);
+      params.push(lim);
+      sql += ` LIMIT $${params.length}`;
+    } else if (!Number.isNaN(lim) && lim > 0 && lim <= 500) {
       params.push(lim);
       sql += ` LIMIT $${params.length}`;
     }
+
     const result = await pool.query(sql, params);
     res.json({ success: true, data: result.rows });
   } catch (error) {

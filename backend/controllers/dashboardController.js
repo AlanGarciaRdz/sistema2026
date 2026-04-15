@@ -1,11 +1,29 @@
 const pool = require('../config/db');
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Rango [desde, hasta] normalizado o null. */
+const normalizeQueryRange = (a, b) => {
+  if (a == null || b == null || a === '' || b === '') return null;
+  let x = String(a).trim();
+  let y = String(b).trim();
+  if (!DATE_ONLY.test(x) || !DATE_ONLY.test(y)) return null;
+  if (x > y) {
+    const t = x;
+    x = y;
+    y = t;
+  }
+  return [x, y];
+};
+
 // Get dashboard metrics and data
 const getDashboardData = async (req, res) => {
   try {
-    const { start, end } = req.query;
-    const hasDateRange = start && end;
-    const dateParams = hasDateRange ? [start, end] : [];
+    const { start, end, metricStart, metricEnd } = req.query;
+    const userRange = normalizeQueryRange(start, end);
+    const metricFallback = !userRange && normalizeQueryRange(metricStart, metricEnd);
+    const metricsRange = userRange || metricFallback;
+    const hasUserAccountsRange = Boolean(userRange);
 
     // Get total clients
     const clientsResult = await pool.query('SELECT COUNT(*) as total FROM clients');
@@ -20,30 +38,35 @@ const getDashboardData = async (req, res) => {
       "SELECT COUNT(*) as total FROM quotes WHERE status = 'Pendiente'"
     );
     
-    // Get total revenue: current month if no range, else by date range
-    const revenueQuery = hasDateRange
+    // Ingresos: mismo criterio que Payments.jsx (todos los tipos, incl. transferencias internas).
+    // Rango: URL start/end, o metricStart/metricEnd (mes local del navegador), o mes en America/Mexico_City.
+    const revenueQuery = metricsRange
       ? `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-         WHERE payment_date >= $1 AND payment_date <= $2
-           AND COALESCE(payment_type, '') <> 'Transferencia interna'`
-      : `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-         WHERE EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-           AND EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-           AND COALESCE(payment_type, '') <> 'Transferencia interna'`;
-    const revenueResult = await pool.query(revenueQuery, dateParams);
+         WHERE payment_date::date >= $1::date AND payment_date::date <= $2::date`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COALESCE(SUM(p.amount), 0) AS total
+         FROM payments p, mx
+         WHERE p.payment_date::date >= date_trunc('month', mx.today_mx)::date
+           AND p.payment_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
+    const revenueResult = await pool.query(revenueQuery, metricsRange || []);
 
-    // Get total expenses: same logic (excluye traspasos entre cuentas)
-    const expensesQuery = hasDateRange
+    // Egresos: misma base que Egresos.jsx.
+    const expensesQuery = metricsRange
       ? `SELECT COALESCE(SUM(amount), 0) as total FROM expenses
-         WHERE expense_date >= $1 AND expense_date <= $2
-           AND COALESCE(expense_type, '') <> 'Transferencia entre cuentas'`
-      : `SELECT COALESCE(SUM(amount), 0) as total FROM expenses
-         WHERE EXTRACT(MONTH FROM expense_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-           AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-           AND COALESCE(expense_type, '') <> 'Transferencia entre cuentas'`;
-    const expensesResult = await pool.query(expensesQuery, dateParams);
+         WHERE expense_date::date >= $1::date AND expense_date::date <= $2::date`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COALESCE(SUM(e.amount), 0) AS total
+         FROM expenses e, mx
+         WHERE e.expense_date::date >= date_trunc('month', mx.today_mx)::date
+           AND e.expense_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
+    const expensesResult = await pool.query(expensesQuery, metricsRange || []);
 
-    // Accounts by business unit: all-time if no range, else filter by date range
-    const accountsQuery = hasDateRange
+    // Cuentas: solo si el usuario eligió fechas en la URL (no aplica a metricStart/metricEnd).
+    const accountsQuery = hasUserAccountsRange
       ? `SELECT pa.id, pa.account_name, pa.bank_name,
            COALESCE(pa.business_unit, 'Sin unidad') as business_unit,
            COALESCE(p.total, 0)::numeric - COALESCE(e.total, 0)::numeric as balance
@@ -70,7 +93,7 @@ const getDashboardData = async (req, res) => {
          ) e ON pa.id = e.payment_account_id
          WHERE pa.status = 'Active' OR pa.status IS NULL
          ORDER BY pa.business_unit, pa.account_name`;
-    const accountsResult = await pool.query(accountsQuery, hasDateRange ? [start, end] : []);
+    const accountsResult = await pool.query(accountsQuery, hasUserAccountsRange ? userRange : []);
     
     // Get 5 most recent contracts
     const recentContractsResult = await pool.query(`
@@ -136,7 +159,7 @@ const getDashboardData = async (req, res) => {
         pendingQuotes: parseInt(pendingQuotesResult.rows[0].total),
         currentMonthRevenue: parseFloat(revenueResult.rows[0].total),
         currentMonthExpenses: parseFloat(expensesResult.rows[0].total),
-        dateRange: hasDateRange ? { start, end } : null
+        dateRange: userRange ? { start: userRange[0], end: userRange[1] } : null
       },
       accountsByBank,
       accountsByBusinessUnit,

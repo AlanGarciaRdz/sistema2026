@@ -5,7 +5,12 @@
  */
 const pool = require('../config/db');
 
-const PAYMENT_METHODS = ['Efectivo', 'Depósito', 'Transferencia'];
+const PAYMENT_METHODS = [
+  'Efectivo',
+  'Depósito',
+  'Transferencia',
+  'Tarjeta'
+];
 
 const getContractByNumber = async (contractNumber) => {
   const r = await pool.query(

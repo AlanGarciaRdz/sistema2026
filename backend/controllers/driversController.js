@@ -33,17 +33,42 @@ const getDriverById = async (req, res) => {
 // Create new driver
 const createDriver = async (req, res) => {
   try {
-    const { name, license_number, documents, phone, email, status } = req.body;
-    
+    const {
+      name,
+      license_number,
+      documents,
+      phone,
+      email,
+      status,
+      start_date,
+      social_security_number,
+      curp,
+      job_title
+    } = req.body;
+
     if (!name) {
       return res.status(400).json({ success: false, error: 'Name is required' });
     }
-    
+
     const result = await pool.query(
-      `INSERT INTO drivers (name, license_number, documents, phone, email, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO drivers (
+         name, license_number, documents, phone, email, status,
+         start_date, social_security_number, curp, job_title
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [name, license_number, documents, phone, email, status || 'Active']
+      [
+        name,
+        license_number,
+        documents,
+        phone,
+        email,
+        status || 'Active',
+        start_date || null,
+        social_security_number || null,
+        curp || null,
+        job_title || null
+      ]
     );
     
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -57,15 +82,39 @@ const createDriver = async (req, res) => {
 const updateDriver = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, license_number, documents, phone, email, status } = req.body;
-    
+    const {
+      name,
+      license_number,
+      documents,
+      phone,
+      email,
+      status,
+      start_date,
+      social_security_number,
+      curp,
+      job_title
+    } = req.body;
+
     const result = await pool.query(
       `UPDATE drivers SET
         name = $1, license_number = $2, documents = $3, phone = $4,
-        email = $5, status = $6, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $7
+        email = $5, status = $6, start_date = $7, social_security_number = $8,
+        curp = $9, job_title = $10, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $11
       RETURNING *`,
-      [name, license_number, documents, phone, email, status, id]
+      [
+        name,
+        license_number,
+        documents,
+        phone,
+        email,
+        status,
+        start_date || null,
+        social_security_number || null,
+        curp || null,
+        job_title || null,
+        id
+      ]
     );
     
     if (result.rows.length === 0) {

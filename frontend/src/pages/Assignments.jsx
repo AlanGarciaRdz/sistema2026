@@ -16,6 +16,7 @@ import Modal from '../components/Modal';
 import FormSelect from '../components/FormSelect';
 import FormInput from '../components/FormInput';
 import Button from '../components/Button';
+import { formatDateLocal } from '../utils/formatDateLocal';
 
 const Assignments = () => {
   const [assignments, setAssignments] = useState([]);
@@ -245,10 +246,7 @@ const Assignments = () => {
     }
   };
 
-  const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('es-MX');
-  };
+  const formatDate = formatDateLocal;
 
   const columns = [
     { header: 'Contrato', accessor: 'contract_number' },

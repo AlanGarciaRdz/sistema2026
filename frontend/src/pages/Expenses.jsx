@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   getExpenses,
   createExpense,
@@ -17,6 +17,17 @@ import Button from '../components/Button';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import { matchesAmountSearch } from '../utils/matchesAmountSearch';
+
+/** Primer y último día del mes local (YYYY-MM-DD). */
+const getCalendarMonthRange = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const pad = (n) => String(n).padStart(2, '0');
+  const start = `${y}-${pad(m + 1)}-01`;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const end = `${y}-${pad(m + 1)}-${lastDay}`;
+  return { start, end };
+};
 
 const EXPENSE_TYPES = [
   { value: 'Agua', label: 'Agua' },
@@ -57,6 +68,8 @@ const Expenses = () => {
   const [tableSearch, setTableSearch] = useState('');
   const [contractSearch, setContractSearch] = useState('');
   const [viewMode, setViewMode] = useState('all');
+  const [{ start: dateFrom, end: dateTo }, setDateRange] = useState(() => getCalendarMonthRange());
+  const expensesFetchSeq = useRef(0);
   const [validateModal, setValidateModal] = useState(null);
   const [validateAccountId, setValidateAccountId] = useState('');
   const [formData, setFormData] = useState({
@@ -77,21 +90,44 @@ const Expenses = () => {
 
   useEffect(() => {
     fetchExpenses();
-  }, [viewMode]);
+  }, [viewMode, dateFrom, dateTo]);
 
   const fetchExpenses = async () => {
+    const seq = ++expensesFetchSeq.current;
     try {
       setLoading(true);
-      const params =
-        viewMode === 'pending'
-          ? { validation_status: 'pending' }
-          : { limit: 20 };
+      const DATE = /^\d{4}-\d{2}-\d{2}$/;
+      const hasRange = DATE.test(dateFrom) && DATE.test(dateTo);
+      let a = dateFrom;
+      let b = dateTo;
+      if (hasRange && a > b) {
+        const t = a;
+        a = b;
+        b = t;
+      }
+      let params;
+      if (viewMode === 'pending') {
+        params = { validation_status: 'pending' };
+        if (hasRange) {
+          params.start = a;
+          params.end = b;
+          params.limit = 5000;
+        } else {
+          params.limit = 500;
+        }
+      } else if (hasRange) {
+        params = { start: a, end: b, limit: 5000 };
+      } else {
+        params = { limit: 20 };
+      }
       const response = await getExpenses(params);
+      if (seq !== expensesFetchSeq.current) return;
       setExpenses(response.data.data || []);
     } catch (error) {
+      if (seq !== expensesFetchSeq.current) return;
       setToast({ message: 'Error al cargar gastos', type: 'error' });
     } finally {
-      setLoading(false);
+      if (seq === expensesFetchSeq.current) setLoading(false);
     }
   };
 
@@ -287,6 +323,11 @@ const Expenses = () => {
     });
   }, [expenses, tableSearch, contracts]);
 
+  const expensesTableTotal = useMemo(
+    () => filteredExpenses.reduce((s, row) => s + (parseFloat(row.amount) || 0), 0),
+    [filteredExpenses]
+  );
+
   const groupedExpenseSections = useMemo(() => {
     const list = filteredExpenses;
     const byContract = new Map();
@@ -396,6 +437,52 @@ const Expenses = () => {
         }}
       />
 
+      <div className="mb-4 flex flex-wrap items-end gap-4 p-4 bg-white rounded-lg border border-gray-200">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateRange((r) => ({ ...r, start: e.target.value }))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px]"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateRange((r) => ({ ...r, end: e.target.value }))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setDateRange(getCalendarMonthRange())}
+          className="px-3 py-2 text-sm font-medium text-blue-600 hover:underline"
+        >
+          Mes en curso
+        </button>
+        <button
+          type="button"
+          onClick={() => setDateRange({ start: '', end: '' })}
+          className="px-3 py-2 text-sm font-medium text-gray-600 hover:underline"
+        >
+          Sin filtro de fechas
+        </button>
+        
+        <div className="ml-auto rounded-lg bg-amber-50 border border-amber-100 px-4 py-2 min-w-[180px]">
+          <p className="text-xs text-amber-800">Total en tabla</p>
+          <p className="text-lg font-bold text-amber-900 tabular-nums">
+            {formatCurrency(expensesTableTotal)}
+          </p>
+          <p className="text-xs text-amber-700/80 mt-0.5">
+            {filteredExpenses.length} registro{filteredExpenses.length === 1 ? '' : 's'}
+            {tableSearch.trim() ? ' (con búsqueda)' : ''}
+          </p>
+        </div>
+      </div>
+
       <div className="mb-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -429,9 +516,19 @@ const Expenses = () => {
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        {viewMode === 'all' && !tableSearch && (
+        {viewMode === 'all' && !tableSearch && !(dateFrom && dateTo) && (
           <p className="mt-2 text-sm text-gray-600">
-            Mostrando los 20 egresos más recientes
+            Sin rango de fechas: se muestran los 20 egresos más recientes.
+          </p>
+        )}
+        {viewMode === 'all' && !tableSearch && dateFrom && dateTo && (
+          <p className="mt-2 text-sm text-gray-600">
+            Egresos con fecha entre {dateFrom} y {dateTo} (hasta 5000 registros).
+          </p>
+        )}
+        {viewMode === 'pending' && dateFrom && dateTo && !tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Por validar con fecha entre {dateFrom} y {dateTo}.
           </p>
         )}
         {tableSearch && (

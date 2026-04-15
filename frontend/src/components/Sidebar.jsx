@@ -39,7 +39,7 @@ const Sidebar = ({ isCollapsed = false, onToggleCollapse }) => {
     { path: '/contracts', label: 'Contratos', icon: FileCheck },
     { path: '/payments', label: 'Ingresos', icon: DollarSign },
     { path: '/expenses', label: 'Egresos', icon: Receipt },
-    { path: '/drivers', label: 'Choferes', icon: User },
+    { path: '/drivers', label: 'Personal', icon: User },
     { path: '/vehicles', label: 'Vehículos', icon: Truck },
     { path: '/maintenance', label: 'Mantenimiento', icon: Wrench },
     { path: '/assignments', label: 'Asignaciones', icon: Calendar },

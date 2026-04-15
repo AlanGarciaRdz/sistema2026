@@ -20,6 +20,18 @@ import Toast from '../components/Toast';
 import jsPDF from 'jspdf';
 import { FileDown, ArrowLeftRight } from 'lucide-react';
 import { matchesAmountSearch } from '../utils/matchesAmountSearch';
+import { formatDateLocal, toYmdLocal } from '../utils/formatDateLocal';
+
+/** Primer y último día del mes local (YYYY-MM-DD). */
+const getCalendarMonthRange = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const pad = (n) => String(n).padStart(2, '0');
+  const start = `${y}-${pad(m + 1)}-01`;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const end = `${y}-${pad(m + 1)}-${lastDay}`;
+  return { start, end };
+};
 
 const Payments = () => {
   const [payments, setPayments] = useState([]);
@@ -41,6 +53,7 @@ const Payments = () => {
   
   const [sourceSearch, setSourceSearch] = useState('');
   const [tableSearch, setTableSearch] = useState('');
+  const [{ start: payDateFrom, end: payDateTo }, setPayDateRange] = useState(getCalendarMonthRange);
   const [formData, setFormData] = useState({
     sourceType: 'quote', // 'quote' | 'contract' | 'none'
     sourceId: '',
@@ -416,15 +429,29 @@ const Payments = () => {
     }).format(amount || 0);
   };
 
-  const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('es-MX');
-  };
+  const formatDate = (date) => formatDateLocal(date);
+
+  const paymentsInDateRange = useMemo(() => {
+    const DATE = /^\d{4}-\d{2}-\d{2}$/;
+    if (!DATE.test(payDateFrom) || !DATE.test(payDateTo)) return payments;
+    let a = payDateFrom;
+    let b = payDateTo;
+    if (a > b) {
+      const t = a;
+      a = b;
+      b = t;
+    }
+    return payments.filter((p) => {
+      const d = toYmdLocal(p.payment_date);
+      return d && d >= a && d <= b;
+    });
+  }, [payments, payDateFrom, payDateTo]);
 
   const filteredPayments = useMemo(() => {
-    if (!tableSearch.trim()) return payments;
+    const base = paymentsInDateRange;
+    if (!tableSearch.trim()) return base;
     const q = tableSearch.toLowerCase().trim();
-    return payments.filter((p) => {
+    return base.filter((p) => {
       if (matchesAmountSearch(tableSearch.trim(), p.amount)) return true;
 
       let notesData = {};
@@ -476,7 +503,12 @@ const Payments = () => {
         clientName.toLowerCase().includes(q)
       );
     });
-  }, [payments, tableSearch, quotes, contracts, accounts]);
+  }, [paymentsInDateRange, tableSearch, quotes, contracts, accounts]);
+
+  const paymentsTableTotal = useMemo(
+    () => filteredPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0),
+    [filteredPayments]
+  );
 
   const columns = [
         { 
@@ -595,6 +627,51 @@ const Payments = () => {
         </Button>
       </Header>
 
+      <div className="mb-4 flex flex-wrap items-end gap-4 p-4 bg-white rounded-lg border border-gray-200">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Desde</label>
+          <input
+            type="date"
+            value={payDateFrom}
+            onChange={(e) => setPayDateRange((r) => ({ ...r, start: e.target.value }))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px]"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Hasta</label>
+          <input
+            type="date"
+            value={payDateTo}
+            onChange={(e) => setPayDateRange((r) => ({ ...r, end: e.target.value }))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setPayDateRange(getCalendarMonthRange())}
+          className="px-3 py-2 text-sm font-medium text-blue-600 hover:underline"
+        >
+          Mes en curso
+        </button>
+        <button
+          type="button"
+          onClick={() => setPayDateRange({ start: '', end: '' })}
+          className="px-3 py-2 text-sm font-medium text-gray-600 hover:underline"
+        >
+          Sin filtro de fechas
+        </button>
+        <div className="ml-auto rounded-lg bg-green-50 border border-green-100 px-4 py-2 min-w-[180px]">
+          <p className="text-xs text-green-800">Total en tabla</p>
+          <p className="text-lg font-bold text-green-900 tabular-nums">
+            {formatCurrency(paymentsTableTotal)}
+          </p>
+          <p className="text-xs text-green-800/80 mt-0.5">
+            {filteredPayments.length} registro{filteredPayments.length === 1 ? '' : 's'}
+            {tableSearch.trim() ? ' (con búsqueda)' : ''}
+          </p>
+        </div>
+      </div>
+
       <div className="mb-4">
         <input
           type="text"
@@ -603,9 +680,20 @@ const Payments = () => {
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
+        {payDateFrom && payDateTo && !tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Ingresos con fecha de pago entre {payDateFrom} y {payDateTo}.
+          </p>
+        )}
+        {!(payDateFrom && payDateTo) && !tableSearch && (
+          <p className="mt-2 text-sm text-gray-600">
+            Sin rango: se muestran todos los ingresos cargados.
+          </p>
+        )}
         {tableSearch && (
           <p className="mt-2 text-sm text-gray-600">
-            Mostrando {filteredPayments.length} de {payments.length} pagos
+            Mostrando {filteredPayments.length} de {paymentsInDateRange.length} en el periodo
+            {paymentsInDateRange.length !== payments.length ? ` (${payments.length} en total)` : ''}
           </p>
         )}
       </div>

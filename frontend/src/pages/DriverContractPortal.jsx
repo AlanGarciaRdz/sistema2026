@@ -9,11 +9,13 @@ import {
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import { Truck, Pencil } from 'lucide-react';
+import { formatDateLocal } from '../utils/formatDateLocal';
 
 const PAYMENT_METHODS = [
   { value: 'Efectivo', label: 'Efectivo' },
   { value: 'Depósito', label: 'Depósito' },
-  { value: 'Transferencia', label: 'Transferencia' }
+  { value: 'Transferencia', label: 'Transferencia' },
+  { value: 'Tarjeta', label: 'Tarjeta' }
 ];
 
 const EXPENSE_TYPES = [
@@ -80,7 +82,7 @@ const DriverContractPortal = () => {
   const formatCurrency = (n) =>
     new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n || 0);
 
-  const formatDate = (d) => (d ? new Date(d).toLocaleDateString('es-MX') : '-');
+  const formatDate = formatDateLocal;
 
   const resetExpenseForm = () => {
     setEditingExpense(null);

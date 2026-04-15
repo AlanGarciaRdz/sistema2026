@@ -14,8 +14,9 @@ import Table from '../components/Table';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import { Link } from 'react-router-dom';
-import { FileDown, Copy, Eye, Link2, Share2, User } from 'lucide-react';
+import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet } from 'lucide-react';
 import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
+import { formatDateLocal, diffInclusiveCalendarDays } from '../utils/formatDateLocal';
 import TripSummaryModal from '../components/TripSummaryModal';
 
 const driverPortalPath = (contractNumber) => `/c/${encodeURIComponent(contractNumber)}`;
@@ -38,6 +39,14 @@ const generateContractNumber = () => {
   const h = String(now.getHours()).padStart(2, '0');
   const min = String(now.getMinutes()).padStart(2, '0');
   return `${y}${m}${d}${h}${min}`;
+};
+
+/** CSV para abrir en Excel (UTF-8 con BOM). */
+const escapeCsvCell = (val) => {
+  if (val == null || val === '') return '';
+  const s = String(val);
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 };
 
 const Contracts = () => {
@@ -295,10 +304,7 @@ const Contracts = () => {
     }).format(amount || 0);
   };
 
-  const formatDate = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('es-MX');
-  };
+  const formatDate = formatDateLocal;
 
   const getUnitType = (row) => {
     try {
@@ -373,6 +379,78 @@ const Contracts = () => {
     assignments
   ]);
 
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(
+        filterFechaInicio ||
+          filterFechaFin ||
+          (filterCliente && filterCliente.trim()) ||
+          (filterNoContrato && filterNoContrato.trim()) ||
+          filterEstado ||
+          (filterDestino && filterDestino.trim()) ||
+          (filterChofer && filterChofer.trim())
+      ),
+    [
+      filterFechaInicio,
+      filterFechaFin,
+      filterCliente,
+      filterNoContrato,
+      filterEstado,
+      filterDestino,
+      filterChofer
+    ]
+  );
+
+  const filteredTotalSum = useMemo(
+    () => filteredContracts.reduce((s, row) => s + (parseFloat(row.total_amount) || 0), 0),
+    [filteredContracts]
+  );
+
+  const exportContractsToExcel = () => {
+    const headers = [
+      'No. Contrato',
+      'Cliente',
+      'Origen',
+      'Destino',
+      'Fecha Inicio',
+      'Fecha Fin',
+      'Monto',
+      'Itinerario',
+      'Tipo de unidad',
+      'Chofer asignado'
+    ];
+    const lines = [headers.map(escapeCsvCell).join(',')];
+    for (const row of filteredContracts) {
+      const fd = (d) => (d && formatDateLocal(d) !== '-' ? formatDateLocal(d) : '');
+      const drivers = getAssignedDriverNames(row);
+      const record = [
+        row.contract_number ?? '',
+        row.client_name ?? '',
+        row.origin ?? '',
+        row.destination ?? '',
+        fd(row.start_date),
+        fd(row.end_date),
+        parseFloat(row.total_amount) || 0,
+        (row.itinerary ?? '').trim(),
+        getUnitType(row),
+        drivers.length ? drivers.join('; ') : ''
+      ];
+      lines.push(record.map(escapeCsvCell).join(','));
+    }
+    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contratos_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setToast({ message: 'Archivo descargado (ábrelo con Excel)', type: 'success' });
+  };
+
   const getPaidAmount = (contractId) => {
     return (payments || [])
       .filter((p) => p.contract_id != null && p.contract_id == contractId)
@@ -443,6 +521,16 @@ const Contracts = () => {
     { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
     {
       header: 'Monto Total',
+      headerRender: () => (
+        <div className="flex flex-col gap-1 items-start">
+          <span className="uppercase tracking-wider">Monto Total</span>
+          {hasActiveFilters && (
+            <span className="normal-case text-[11px] font-bold text-blue-800 tabular-nums leading-tight">
+              Σ {formatCurrency(filteredTotalSum)}
+            </span>
+          )}
+        </div>
+      ),
       width: '170px',
       render: (row) => {
         const total = parseFloat(row.total_amount) || 0;
@@ -455,11 +543,10 @@ const Contracts = () => {
         const utilidad = paid - totalExpenses;
         const pctUtilidad = paid > 0 ? ((utilidad / paid) * 100).toFixed(1) : null;
 
-        const start = row.start_date ? new Date(row.start_date) : null;
-        const end = row.end_date ? new Date(row.end_date) : null;
-        const days = start && end
-          ? Math.max(1, Math.ceil((end - start) / (24 * 60 * 60 * 1000)) + 1)
-          : 0;
+        const days =
+          row.start_date && row.end_date
+            ? diffInclusiveCalendarDays(row.start_date, row.end_date)
+            : 0;
         const utilidadPorDia = days > 0 && hasPayments ? utilidad / days : null;
 
         return (
@@ -600,6 +687,19 @@ const Contracts = () => {
               className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={exportContractsToExcel}
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg border border-emerald-700/20 touch-manipulation"
+          >
+            <FileSpreadsheet size={18} aria-hidden />
+            Exportar a Excel
+          </button>
+          <span className="text-xs text-gray-600">
+            {filteredContracts.length} registro{filteredContracts.length === 1 ? '' : 's'} (según filtros)
+          </span>
         </div>
       </div>
 

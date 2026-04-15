@@ -11,7 +11,8 @@ const FormInput = ({
   required = false,
   disabled = false,
   error,
-  className = ''
+  className = '',
+  maxLength
 }) => {
   return (
     <div className={`mb-4 ${className}`}>
@@ -29,6 +30,7 @@ const FormInput = ({
         placeholder={placeholder}
         required={required}
         disabled={disabled}
+        maxLength={maxLength}
         className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
           error ? 'border-red-500' : ''
         } ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}

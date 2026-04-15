@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { getPaymentsByContractNumber } from '../services/api';
+import { formatDateLocal } from '../utils/formatDateLocal';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount || 0);
-
-const formatDate = (date) => (date ? new Date(date).toLocaleDateString('es-MX') : '-');
 
 /** Format YYYY-MM-DD as "14 de marzo de 2026" (sin cambio de zona horaria) */
 const formatDateLong = (dateStr) => {
@@ -157,7 +156,7 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
           </div>
           <div>
             <span className="text-gray-500">Fecha inicio</span>
-            <p className="font-medium">{formatDate(row.start_date)}</p>
+            <p className="font-medium">{formatDateLocal(row.start_date)}</p>
           </div>
           <div>
             <span className="text-gray-500">Ruta</span>

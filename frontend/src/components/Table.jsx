@@ -103,12 +103,12 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                     style={column.width ? { width: column.width } : column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
                     key={index}
                     onClick={() => canSort && handleSort(column)}
-                    className={`px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${
+                    className={`sticky top-0 z-10 bg-gray-50 px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider shadow-[inset_0_-1px_0_0_rgb(229,231,235)] ${
                       canSort ? 'cursor-pointer select-none hover:bg-gray-100 transition-colors' : ''
                     }`}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {column.header}
+                      {column.headerRender ? column.headerRender() : column.header}
                       {canSort && isActive && (
                         sortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
                       )}
@@ -117,7 +117,7 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                 );
               })}
               {hasActions && (
-                <th className="px-4 sm:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="sticky top-0 z-10 bg-gray-50 px-4 sm:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider shadow-[inset_0_-1px_0_0_rgb(229,231,235)]">
                   Acciones
                 </th>
               )}

@@ -22,7 +22,11 @@ const Drivers = () => {
     documents: '',
     phone: '',
     email: '',
-    status: 'Active'
+    status: 'Active',
+    start_date: '',
+    social_security_number: '',
+    curp: '',
+    job_title: ''
   });
 
   useEffect(() => {
@@ -35,7 +39,7 @@ const Drivers = () => {
       const response = await getDrivers();
       setDrivers(response.data.data);
     } catch (error) {
-      setToast({ message: 'Error al cargar choferes', type: 'error' });
+      setToast({ message: 'Error al cargar personal', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -46,16 +50,16 @@ const Drivers = () => {
     try {
       if (editingDriver) {
         await updateDriver(editingDriver.id, formData);
-        setToast({ message: 'Chofer actualizado exitosamente', type: 'success' });
+        setToast({ message: 'Registro actualizado exitosamente', type: 'success' });
       } else {
         await createDriver(formData);
-        setToast({ message: 'Chofer creado exitosamente', type: 'success' });
+        setToast({ message: 'Personal registrado exitosamente', type: 'success' });
       }
       setIsModalOpen(false);
       resetForm();
       fetchDrivers();
     } catch (error) {
-      setToast({ message: 'Error al guardar chofer', type: 'error' });
+      setToast({ message: 'Error al guardar', type: 'error' });
     }
   };
 
@@ -67,19 +71,23 @@ const Drivers = () => {
       documents: driver.documents || '',
       phone: driver.phone || '',
       email: driver.email || '',
-      status: driver.status || 'Active'
+      status: driver.status || 'Active',
+      start_date: driver.start_date ? String(driver.start_date).slice(0, 10) : '',
+      social_security_number: driver.social_security_number || '',
+      curp: driver.curp || '',
+      job_title: driver.job_title || ''
     });
     setIsModalOpen(true);
   };
 
   const handleDelete = async (driver) => {
-    if (window.confirm('¿Está seguro de eliminar este chofer?')) {
+    if (window.confirm('¿Está seguro de eliminar este registro de personal?')) {
       try {
         await deleteDriver(driver.id);
-        setToast({ message: 'Chofer eliminado exitosamente', type: 'success' });
+        setToast({ message: 'Registro eliminado exitosamente', type: 'success' });
         fetchDrivers();
       } catch (error) {
-        setToast({ message: 'Error al eliminar chofer', type: 'error' });
+        setToast({ message: 'Error al eliminar', type: 'error' });
       }
     }
   };
@@ -91,7 +99,11 @@ const Drivers = () => {
       documents: '',
       phone: '',
       email: '',
-      status: 'Active'
+      status: 'Active',
+      start_date: '',
+      social_security_number: '',
+      curp: '',
+      job_title: ''
     });
     setEditingDriver(null);
   };
@@ -131,9 +143,12 @@ const Drivers = () => {
   return (
     <div className="p-6">
       <Header
-        title="Choferes"
-        buttonText="+ Nuevo Chofer"
-        onButtonClick={() => setIsModalOpen(true)}
+        title="Personal"
+        buttonText="+ Agregar personal"
+        onButtonClick={() => {
+          resetForm();
+          setIsModalOpen(true);
+        }}
       />
 
       <Table
@@ -157,7 +172,7 @@ const Drivers = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); resetForm(); }}
-        title={editingDriver ? 'Editar Chofer' : 'Nuevo Chofer'}
+        title={editingDriver ? 'Editar personal' : 'Agregar personal'}
       >
         <form onSubmit={handleSubmit}>
           <FormInput
@@ -174,6 +189,36 @@ const Drivers = () => {
             name="license_number"
             value={formData.license_number}
             onChange={(e) => setFormData({ ...formData, license_number: e.target.value })}
+          />
+          <FormInput
+            label="Fecha de inicio"
+            id="start_date"
+            name="start_date"
+            type="date"
+            value={formData.start_date}
+            onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+          />
+          <FormInput
+            label="Número de seguro social"
+            id="social_security_number"
+            name="social_security_number"
+            value={formData.social_security_number}
+            onChange={(e) => setFormData({ ...formData, social_security_number: e.target.value })}
+          />
+          <FormInput
+            label="CURP"
+            id="curp"
+            name="curp"
+            value={formData.curp}
+            onChange={(e) => setFormData({ ...formData, curp: e.target.value })}
+            maxLength={18}
+          />
+          <FormInput
+            label="Puesto en la empresa"
+            id="job_title"
+            name="job_title"
+            value={formData.job_title}
+            onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
           />
           <FormInput
             label="Documentos"

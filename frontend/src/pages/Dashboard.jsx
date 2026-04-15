@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getDashboardData } from '../services/api';
+import { getCalendarMonthRange } from '../utils/formatDateLocal';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
@@ -24,6 +25,10 @@ const Dashboard = () => {
         if (dateStart && dateEnd) {
           params.start = dateStart;
           params.end = dateEnd;
+        } else {
+          const { start: ms, end: me } = getCalendarMonthRange();
+          params.metricStart = ms;
+          params.metricEnd = me;
         }
         const response = await getDashboardData(params);
         if (!cancelled) setData(response.data.data);
@@ -113,7 +118,8 @@ const Dashboard = () => {
           )}
         </div>
         <p className="mt-2 text-xs text-gray-500">
-          Sin fechas: ingresos/egresos = mes actual, cuentas = todo el tiempo. Con fechas: todo filtrado al período.
+          Sin fechas en la barra: ingresos y egresos usan el mes calendario de tu equipo (igual que las páginas
+          Ingresos y Egresos); saldos por cuenta = todo el tiempo. Con fechas: todo al período elegido.
         </p>
       </div>
 

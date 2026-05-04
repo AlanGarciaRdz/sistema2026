@@ -14,6 +14,16 @@ export function getCalendarMonthRange(d = new Date()) {
   const end = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
   return { start, end };
 }
+
+/** Día 1 del mes local hasta hoy (YYYY-MM-DD). Para métricas MTD del dashboard. */
+export function getMonthToDateRange(d = new Date()) {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const pad = (n) => String(n).padStart(2, '0');
+  const start = `${y}-${pad(m + 1)}-01`;
+  const end = `${y}-${pad(m + 1)}-${pad(d.getDate())}`;
+  return { start, end };
+}
 /**
  * Fecha calendario local como YYYY-MM-DD (para filtros y comparaciones).
  * Evita usar solo el prefijo ISO del string: en UTC puede ser otro día que en local.

@@ -5,6 +5,7 @@ import {
   deleteContract,
   createContract,
   updateContract,
+  syncContractCalendar,
   getPayments,
   getExpenses,
   getAssignments
@@ -14,7 +15,7 @@ import Table from '../components/Table';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import { Link } from 'react-router-dom';
-import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet } from 'lucide-react';
+import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet, Calendar } from 'lucide-react';
 import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
 import { formatDateLocal, diffInclusiveCalendarDays } from '../utils/formatDateLocal';
 import TripSummaryModal from '../components/TripSummaryModal';
@@ -67,6 +68,7 @@ const Contracts = () => {
   const [filterDestino, setFilterDestino] = useState('');
   const [filterChofer, setFilterChofer] = useState('');
   const [summaryRow, setSummaryRow] = useState(null);
+  const [syncingCalendarId, setSyncingCalendarId] = useState(null);
 
   useEffect(() => {
     fetchContracts();
@@ -297,6 +299,25 @@ const Contracts = () => {
     }
   };
 
+  const handleSyncCalendar = async (row) => {
+    try {
+      setSyncingCalendarId(row.id);
+      const res = await syncContractCalendar(row.id);
+      setToast({
+        message: res.data.calendarMessage || 'Calendario sincronizado',
+        type: 'success'
+      });
+      fetchContracts();
+    } catch (error) {
+      setToast({
+        message: error.response?.data?.error || 'No se pudo sincronizar el calendario',
+        type: 'error'
+      });
+    } finally {
+      setSyncingCalendarId(null);
+    }
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -516,7 +537,26 @@ const Contracts = () => {
     },
     { header: 'Cliente', accessor: 'client_name', maxWidth: '120px', wrap: true },
     { header: 'Origen', accessor: 'origin', maxWidth: '120px', wrap: true },
-    { header: 'Destino', accessor: 'destination', maxWidth: '120px', wrap: true },
+    {
+      header: 'Destino',
+      maxWidth: '120px',
+      wrap: true,
+      render: (row) => {
+        const itin = (row.itinerary || '').replace(/\s+/g, ' ').trim();
+        const preview =
+          itin.length > 25 ? `${itin.slice(0, 25)}…` : itin;
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span>{row.destination || '—'}</span>
+            {preview ? (
+              <span className="text-[10px] text-gray-500 leading-snug break-words" title={itin}>
+                {preview}
+              </span>
+            ) : null}
+          </div>
+        );
+      }
+    },
     { header: 'Fecha Inicio', render: (row) => formatDate(row.start_date), width: '95px' },
     { header: 'Fecha Fin', render: (row) => formatDate(row.end_date), width: '95px' },
     {
@@ -726,6 +766,23 @@ const Contracts = () => {
             >
               <Link2 size={18} />
             </Link>
+            <button
+              type="button"
+              onClick={() => handleSyncCalendar(row)}
+              disabled={syncingCalendarId === row.id}
+              className={`transition-colors p-1 disabled:opacity-50 ${
+                row.calendar_event_id
+                  ? 'text-sky-700 hover:text-sky-900'
+                  : 'text-sky-600 hover:text-sky-800'
+              }`}
+              title={
+                row.calendar_event_id
+                  ? 'Actualizar evento en Google Calendar'
+                  : 'Crear evento en Google Calendar'
+              }
+            >
+              <Calendar size={18} aria-hidden />
+            </button>
             <button
               type="button"
               onClick={() => copyDriverPortalLink(row.contract_number, setToast)}

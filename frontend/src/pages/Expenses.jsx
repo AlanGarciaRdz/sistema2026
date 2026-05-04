@@ -70,8 +70,12 @@ const Expenses = () => {
   const [viewMode, setViewMode] = useState('all');
   const [{ start: dateFrom, end: dateTo }, setDateRange] = useState(() => getCalendarMonthRange());
   const expensesFetchSeq = useRef(0);
-  const [validateModal, setValidateModal] = useState(null);
+  /** Lista de gastos a validar en el modal (uno o varios); null = cerrado */
+  const [validateTargets, setValidateTargets] = useState(null);
   const [validateAccountId, setValidateAccountId] = useState('');
+  const [validatingBulk, setValidatingBulk] = useState(false);
+  /** IDs marcados en la vista pendiente (chkbox) */
+  const [selectedPendingIds, setSelectedPendingIds] = useState([]);
   const [formData, setFormData] = useState({
     contract_id: '',
     expense_type: '',
@@ -91,6 +95,15 @@ const Expenses = () => {
   useEffect(() => {
     fetchExpenses();
   }, [viewMode, dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (viewMode !== 'pending') setSelectedPendingIds([]);
+  }, [viewMode]);
+
+  useEffect(() => {
+    const ids = new Set(expenses.map((e) => e.id));
+    setSelectedPendingIds((prev) => prev.filter((id) => ids.has(id)));
+  }, [expenses]);
 
   const fetchExpenses = async () => {
     const seq = ++expensesFetchSeq.current;
@@ -198,26 +211,75 @@ const Expenses = () => {
   };
 
   const openValidateModal = (expense) => {
-    setValidateModal(expense);
+    setValidateTargets([expense]);
     setValidateAccountId('');
   };
 
+  const openBulkValidateModal = () => {
+    const rows = filteredExpenses.filter((e) => selectedPendingIds.includes(e.id));
+    if (rows.length === 0) {
+      setToast({ message: 'Marque al menos un gasto en la tabla', type: 'error' });
+      return;
+    }
+    setValidateTargets(rows);
+    setValidateAccountId('');
+  };
+
+  const toggleSelectPending = (id) => {
+    setSelectedPendingIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllVisiblePending = () => {
+    setSelectedPendingIds(filteredExpenses.map((r) => r.id));
+  };
+
+  const clearPendingSelection = () => setSelectedPendingIds([]);
+
   const handleValidateApprove = async (e) => {
     e.preventDefault();
+    if (!validateTargets?.length) return;
     if (!validateAccountId) {
       setToast({ message: 'Seleccione la cuenta contable', type: 'error' });
       return;
     }
+    const accountId = parseInt(validateAccountId, 10);
+    if (Number.isNaN(accountId)) {
+      setToast({ message: 'Cuenta no válida', type: 'error' });
+      return;
+    }
+
     try {
-      await validateExpense(validateModal.id, {
-        action: 'approve',
-        payment_account_id: parseInt(validateAccountId, 10)
-      });
-      setToast({ message: 'Gasto validado', type: 'success' });
-      setValidateModal(null);
+      setValidatingBulk(true);
+      const validatedIds = validateTargets.map((t) => t.id);
+      const results = await Promise.allSettled(
+        validateTargets.map((exp) =>
+          validateExpense(exp.id, { action: 'approve', payment_account_id: accountId })
+        )
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      const fail = results.length - ok;
+      if (fail === 0) {
+        setToast({
+          message:
+            validateTargets.length === 1 ? 'Gasto validado' : `${ok} gastos validados`,
+          type: 'success'
+        });
+      } else {
+        setToast({
+          message: `Validados: ${ok}. Con error: ${fail}. Revise e intente de nuevo.`,
+          type: ok > 0 ? 'warning' : 'error'
+        });
+      }
+      setValidateTargets(null);
+      const idSet = new Set(validatedIds);
+      setSelectedPendingIds((prev) => prev.filter((id) => !idSet.has(id)));
       fetchExpenses();
     } catch (error) {
       setToast({ message: error.response?.data?.error || 'Error al validar', type: 'error' });
+    } finally {
+      setValidatingBulk(false);
     }
   };
 
@@ -412,6 +474,19 @@ const Expenses = () => {
   }, []);
 
   const pendingDetailColumns = useMemo(() => {
+    const seleccion = {
+      header: '',
+      width: '42px',
+      render: (row) => (
+        <input
+          type="checkbox"
+          checked={selectedPendingIds.includes(row.id)}
+          onChange={() => toggleSelectPending(row.id)}
+          className="rounded border-gray-300 cursor-pointer text-emerald-600 focus:ring-emerald-500"
+          aria-label="Seleccionar para validación"
+        />
+      )
+    };
     const tipo = { header: 'Tipo de Gasto', accessor: 'expense_type' };
     const monto = { header: 'Monto', render: (row) => formatCurrency(row.amount) };
     const forma = {
@@ -421,8 +496,8 @@ const Expenses = () => {
     const cuenta = { header: 'Cuenta', accessor: 'account_name' };
     const unidad = { header: 'Unidad de Negocio', accessor: 'business_unit' };
     const fecha = { header: 'Fecha', render: (row) => formatDate(row.expense_date) };
-    return [tipo, monto, forma, cuenta, unidad, fecha];
-  }, []);
+    return [seleccion, tipo, monto, forma, cuenta, unidad, fecha];
+  }, [selectedPendingIds]);
 
   if (loading) return <Loading />;
 
@@ -554,6 +629,37 @@ const Expenses = () => {
         </div>
       ) : (
         <div className="space-y-8">
+          {filteredExpenses.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg bg-emerald-50/90 border border-emerald-100 text-sm">
+              <span className="text-gray-800 font-medium">
+                {selectedPendingIds.length} seleccionado
+                {selectedPendingIds.length === 1 ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                onClick={selectAllVisiblePending}
+                className="text-emerald-700 hover:text-emerald-900 font-medium underline-offset-2 hover:underline"
+              >
+                Marcar todos (visibles)
+              </button>
+              <button
+                type="button"
+                onClick={clearPendingSelection}
+                className="text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
+              >
+                Limpiar marca
+              </button>
+              <button
+                type="button"
+                disabled={selectedPendingIds.length === 0}
+                onClick={openBulkValidateModal}
+                className="ml-auto px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm shadow-sm hover:bg-emerald-700 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                Validar selección
+                {selectedPendingIds.length > 0 ? ` (${selectedPendingIds.length})` : ''}
+              </button>
+            </div>
+          )}
           {groupedExpenseSections.map((section) => {
             const first = section.rows[0];
             const isContract = section.kind === 'contract';
@@ -712,28 +818,47 @@ const Expenses = () => {
       </Modal>
 
       <Modal
-        isOpen={!!validateModal}
-        onClose={() => setValidateModal(null)}
-        title="Validar gasto del chofer"
+        isOpen={!!validateTargets?.length}
+        onClose={() => !validatingBulk && setValidateTargets(null)}
+        title={
+          validateTargets?.length && validateTargets.length > 1
+            ? `Validar ${validateTargets.length} gastos`
+            : 'Validar gasto del chofer'
+        }
         size="md"
       >
-        {validateModal && (
+        {validateTargets?.length ? (
           <form onSubmit={handleValidateApprove} className="space-y-4">
             <p className="text-sm text-gray-600">
-              <strong>{validateModal.expense_type}</strong> · {formatCurrency(validateModal.amount)}
+              Se cargará todo el monto a la <strong>misma cuenta</strong> seleccionada.
             </p>
-            {validateModal.contract_number && (
-              <div className="mt-2 p-3 bg-slate-50 rounded-lg text-sm text-gray-700">
-                <p className="font-semibold text-gray-900">Contrato {validateModal.contract_number}</p>
-                <p>{validateModal.client_name || 'Cliente'}</p>
-                <p className="text-gray-500">
-                  {validateModal.contract_origin || '—'} → {validateModal.contract_destination || '—'}
-                </p>
-              </div>
+            <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100 bg-white">
+              {validateTargets.map((row) => {
+                const contratoSnippet =
+                  row.contract_number &&
+                  `${row.contract_number}${row.client_name ? ` · ${row.client_name}` : ''}`;
+                return (
+                  <div key={row.id} className="px-3 py-2 text-sm text-gray-800">
+                    <div className="font-medium">{row.expense_type}</div>
+                    <div className="text-gray-600 tabular-nums">{formatCurrency(row.amount)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      Chofer:&nbsp;<strong>{row.driver_payment_method || '—'}</strong>
+                    </div>
+                    {contratoSnippet && (
+                      <div className="text-xs text-gray-500 mt-0.5">{contratoSnippet}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {validateTargets.length > 1 && (
+              <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                Total:&nbsp;
+                {formatCurrency(
+                  validateTargets.reduce((s, row) => s + (parseFloat(row.amount) || 0), 0)
+                )}
+              </p>
             )}
-            <p className="text-sm text-gray-600 mt-2">
-              Forma reportada: <strong>{validateModal.driver_payment_method || '—'}</strong>
-            </p>
             <FormSelect
               label="Cuenta (donde se descuenta)"
               value={validateAccountId}
@@ -742,15 +867,20 @@ const Expenses = () => {
               required
             />
             <div className="flex justify-end gap-3 pt-4 border-t">
-              <Button variant="secondary" type="button" onClick={() => setValidateModal(null)}>
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={validatingBulk}
+                onClick={() => setValidateTargets(null)}
+              >
                 Cancelar
               </Button>
-              <Button variant="primary" type="submit">
-                Aprobar gasto
+              <Button variant="primary" type="submit" disabled={validatingBulk}>
+                {validatingBulk ? 'Guardando…' : validateTargets.length > 1 ? 'Aprobar gastos' : 'Aprobar gasto'}
               </Button>
             </div>
           </form>
-        )}
+        ) : null}
       </Modal>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

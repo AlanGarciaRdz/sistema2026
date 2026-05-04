@@ -23,7 +23,7 @@ const EXPENSE_TYPES = [
   { value: 'Nómina', label: 'Nómina / Sueldo' },
   { value: 'Casetas', label: 'Casetas' },
   { value: 'Combustible', label: 'Combustible' },
-  { value: 'TAG', label: 'TAG' },
+  // { value: 'TAG', label: 'TAG' },
   { value: 'Derecho Piso Aeropuerto', label: 'Derecho piso aeropuerto' },
   { value: 'Estacionamiento', label: 'Estacionamiento' },
   { value: 'Hotel', label: 'Hotel' },

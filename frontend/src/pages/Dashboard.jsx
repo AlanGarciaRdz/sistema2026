@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getDashboardData } from '../services/api';
-import { getCalendarMonthRange } from '../utils/formatDateLocal';
+import { getMonthToDateRange } from '../utils/formatDateLocal';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
@@ -26,7 +26,7 @@ const Dashboard = () => {
           params.start = dateStart;
           params.end = dateEnd;
         } else {
-          const { start: ms, end: me } = getCalendarMonthRange();
+          const { start: ms, end: me } = getMonthToDateRange();
           params.metricStart = ms;
           params.metricEnd = me;
         }
@@ -75,8 +75,8 @@ const Dashboard = () => {
   };
 
   const hasDateRange = dateStart && dateEnd;
-  const revenueLabel = hasDateRange ? 'Ingresos (periodo)' : 'Ingresos del Mes';
-  const expensesLabel = hasDateRange ? 'Egresos (periodo)' : 'Egresos del Mes';
+  const revenueLabel = hasDateRange ? 'Ingresos (periodo)' : 'Ingresos (mes hasta hoy)';
+  const expensesLabel = hasDateRange ? 'Egresos (periodo)' : 'Egresos (mes hasta hoy)';
   const accountsSubtitle = hasDateRange
     ? `${dateStart} a ${dateEnd}`
     : 'Todo el tiempo';

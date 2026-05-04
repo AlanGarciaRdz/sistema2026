@@ -35,7 +35,7 @@ const ContractService = ({
 
     // ── mode & folio ──
     const [mode, setMode] = useState('contrato');
-    const [folio] = useState(generateContractNumber);
+    const [folio, setFolio] = useState(() => generateContractNumber());
   
     // Client data
     const [clients, setClients] = useState([]);
@@ -120,6 +120,10 @@ const ContractService = ({
             setCapacity(editingContract.capacity || '');
             setServiceDate(editingContract.serviceDate || '');
             setServiceTime(editingContract.serviceTime || '');
+            setFolio(
+              String(editingContract.folio || editingContract.contract_number || '').trim() ||
+                generateContractNumber()
+            );
           }
         } else {
           loadedEditIdRef.current = null;
@@ -184,6 +188,7 @@ const ContractService = ({
         setCapacity('');
         setServiceDate('');
         setServiceTime('');
+        setFolio(generateContractNumber());
     };
 
     const handleClientSelect = (e) => {
@@ -207,9 +212,13 @@ const ContractService = ({
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        const currentFolio = editingContract?.folio || editingContract?.contract_number || folio;
+        const folioTrim = String(folio || '').trim();
+        if (!folioTrim) {
+          setToast({ message: 'El folio es obligatorio', type: 'error' });
+          return;
+        }
         const base = {
-        folio: currentFolio,
+        folio: folioTrim,
         mode,
         client: selectedClient,
         vehicle: selectedVehicle,
@@ -239,10 +248,10 @@ const ContractService = ({
 
   const handleGeneratePdf = async () => {
     try {
-      const currentFolio = editingContract?.folio || editingContract?.contract_number || folio;
+      const folioTrim = String(folio || '').trim() || editingContract?.folio || editingContract?.contract_number || generateContractNumber();
       const info = await buildPdfInfoFromForm({
         mode,
-        folio: currentFolio,
+        folio: folioTrim,
         contactName,
         contactPhone,
         origin,
@@ -284,9 +293,18 @@ const ContractService = ({
               ? (mode === 'contrato' ? 'Editar contrato' : 'Editar servicio')
               : (mode === 'contrato' ? 'Nuevo contrato'  : 'Nuevo servicio')}
           </h1>
-          <span className="inline-block mt-1 font-mono text-[11px] font-medium text-gray-400 bg-gray-100 rounded px-2 py-0.5 tracking-wider">
-            Folio: {editingContract?.folio || folio}
-          </span>
+          <label className="mt-2 flex flex-col gap-1 max-w-xs">
+            <span className="text-[11px] font-medium text-gray-500">Folio</span>
+            <input
+              type="text"
+              value={folio}
+              onChange={(e) => setFolio(e.target.value)}
+              required
+              autoComplete="off"
+              className="font-mono text-xs font-medium text-gray-900 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 tracking-wider focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
+              placeholder="Número de contrato"
+            />
+          </label>
         </div>
 
         {/* TABS */}

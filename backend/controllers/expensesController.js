@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const pool = require('../config/db');
 const {
   EXPENSE_TYPE_INTERNAL,
@@ -5,6 +6,34 @@ const {
 } = require('../utils/accountTransfers');
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Notes JSON marcando líneas del mismo reparto multipartida. */
+const buildExpenseNotesForSplit = (userNotesRaw, groupId, partIndexOneBased, partTotal) => {
+  const trimmed = userNotesRaw != null ? String(userNotesRaw).trim() : '';
+  let base = {};
+  if (trimmed) {
+    try {
+      const p = JSON.parse(trimmed);
+      if (p && typeof p === 'object' && !Array.isArray(p)) base = p;
+      else base = { user_notes: trimmed };
+    } catch {
+      base = { user_notes: trimmed };
+    }
+  }
+  return JSON.stringify({
+    ...base,
+    expense_split_group: groupId,
+    expense_split_part: partIndexOneBased,
+    expense_split_parts: partTotal
+  });
+};
+
+/** Suma líneas como centavos; tolerancia ±1 ctvs por float. */
+const splitSumMatchesAmount = (splits, amountNum) => {
+  const sumCents = splits.reduce((s, x) => s + Math.round(Number(x.amount) * 100), 0);
+  const totalCents = Math.round(Number(amountNum) * 100);
+  return Math.abs(sumCents - totalCents) <= 1;
+};
 
 // Get all expenses (?validation_status=pending|approved|rejected&start=&end=&limit=)
 const getAllExpenses = async (req, res) => {
@@ -95,14 +124,100 @@ const getExpenseById = async (req, res) => {
   }
 };
 
-// Create new expense
+// Create new expense (opcional multipartida `splits` con varias cuentas)
 const createExpense = async (req, res) => {
-  try {
-    const {
-      contract_id, expense_type, amount, payment_account_id,
-      business_unit, expense_date, notes
-    } = req.body;
-    
+  const {
+    contract_id, expense_type, amount, payment_account_id,
+    business_unit, expense_date, notes, splits
+  } = req.body;
+
+  const amountNum =
+    amount != null && amount !== ''
+      ? Number(amount)
+      : NaN;
+  const splitsArr = Array.isArray(splits) ? splits : null;
+
+  if (splitsArr && splitsArr.length >= 2) {
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ success: false, error: 'Monto inválido para reparto' });
+    }
+    for (const ln of splitsArr) {
+      const pid =
+        ln.payment_account_id != null ? parseInt(ln.payment_account_id, 10) : NaN;
+      const amt = ln.amount != null ? Number(ln.amount) : NaN;
+      if (Number.isNaN(pid) || pid < 1) {
+        return res.status(400).json({ success: false, error: 'Cuenta inválida en reparto' });
+      }
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Cada línea debe tener monto mayor a cero'
+        });
+      }
+    }
+    if (!splitSumMatchesAmount(splitsArr, amountNum)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Los importes por cuenta deben sumar exactamente el monto total'
+      });
+    }
+
+    let client;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const groupId = crypto.randomUUID();
+      const createdRows = [];
+      const n = splitsArr.length;
+      let idx = 0;
+      for (const ln of splitsArr) {
+        idx += 1;
+        const pid = parseInt(ln.payment_account_id, 10);
+        const lineAmount = Number(ln.amount);
+        const buLookup = await client.query(
+          'SELECT business_unit FROM payment_accounts WHERE id = $1',
+          [pid]
+        );
+        const bu =
+          business_unit ||
+          buLookup.rows[0]?.business_unit ||
+          null;
+        const noteStr = buildExpenseNotesForSplit(notes, groupId, idx, n);
+        const ins = await client.query(
+          `INSERT INTO expenses (
+            contract_id, expense_type, amount, payment_account_id,
+            business_unit, expense_date, notes, validation_status, driver_payment_method
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'approved'), $9)
+          RETURNING *`,
+          [
+            contract_id || null,
+            expense_type,
+            lineAmount,
+            pid,
+            bu,
+            expense_date,
+            noteStr,
+            req.body.validation_status,
+            req.body.driver_payment_method || null
+          ]
+        );
+        createdRows.push(ins.rows[0]);
+      }
+      await client.query('COMMIT');
+      res.status(201).json({
+        success: true,
+        data: createdRows,
+        split_group_id: groupId
+      });
+      return;
+    } catch (inner) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      console.error('Error creating split expenses:', inner);
+      return res.status(500).json({ success: false, error: inner.message });
+    } finally {
+      if (client) client.release();
+    }
+  }
     const result = await pool.query(
       `INSERT INTO expenses (
         contract_id, expense_type, amount, payment_account_id,
@@ -110,12 +225,18 @@ const createExpense = async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'approved'), $9)
       RETURNING *`,
       [
-        contract_id, expense_type, amount, payment_account_id, business_unit, expense_date, notes,
+        contract_id,
+        expense_type,
+        amount,
+        payment_account_id,
+        business_unit,
+        expense_date,
+        notes,
         req.body.validation_status,
         req.body.driver_payment_method || null
       ]
     );
-    
+
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error creating expense:', error);

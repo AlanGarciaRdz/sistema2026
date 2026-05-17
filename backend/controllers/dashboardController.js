@@ -27,17 +27,12 @@ const getDashboardData = async (req, res) => {
 
     // Get total clients
     const clientsResult = await pool.query('SELECT COUNT(*) as total FROM clients');
-    
-    // Get active contracts
-    const activeContractsResult = await pool.query(
-      "SELECT COUNT(*) as total FROM contracts WHERE status = 'Agendado'"
+
+    /** Suma de total_amount de contratos en estado Por cobrar (instantáneo, no filtrado por fechas). */
+    const porCobrarResult = await pool.query(
+      `SELECT COALESCE(SUM(total_amount), 0)::numeric AS total
+       FROM contracts WHERE status = 'Por cobrar'`
     );
-    
-    // Get pending quotes
-    const pendingQuotesResult = await pool.query(
-      "SELECT COUNT(*) as total FROM quotes WHERE status = 'Pendiente'"
-    );
-    
     // Ingresos: mismo criterio que Payments.jsx (todos los tipos, incl. transferencias internas).
     // Rango: URL start/end, o metricStart/metricEnd (mes local del navegador), o mes en America/Mexico_City.
     const revenueQuery = metricsRange
@@ -155,8 +150,7 @@ const getDashboardData = async (req, res) => {
     const dashboardData = {
       metrics: {
         totalClients: parseInt(clientsResult.rows[0].total),
-        activeContracts: parseInt(activeContractsResult.rows[0].total),
-        pendingQuotes: parseInt(pendingQuotesResult.rows[0].total),
+        totalDueToCollect: parseFloat(porCobrarResult.rows[0].total),
         currentMonthRevenue: parseFloat(revenueResult.rows[0].total),
         currentMonthExpenses: parseFloat(expensesResult.rows[0].total),
         dateRange: userRange ? { start: userRange[0], end: userRange[1] } : null

@@ -57,6 +57,20 @@ const EXPENSE_TYPES = [
   { value: 'Viatico', label: 'Viatico' }
 ];
 
+/** Reparto en centavos con residuo en las primeras cuentas. */
+const distributeCentsEvenly = (totalCents, n) => {
+  if (n < 1) return [];
+  const t = Math.max(0, Math.round(Number(totalCents)));
+  const q = Math.floor(t / n);
+  const r = t % n;
+  return Array.from({ length: n }, (_, i) => q + (i < r ? 1 : 0));
+};
+
+const splitLineEmpty = () => ({ payment_account_id: '', amount: '' });
+
+const parseAmountToCentsString = (raw) =>
+  Math.round((parseFloat(String(raw ?? '').replace(',', '.')) || 0) * 100);
+
 const Expenses = () => {
   const [expenses, setExpenses] = useState([]);
   const [contracts, setContracts] = useState([]);
@@ -67,6 +81,7 @@ const Expenses = () => {
   const [toast, setToast] = useState(null);
   const [tableSearch, setTableSearch] = useState('');
   const [contractSearch, setContractSearch] = useState('');
+  const [paymentAccountSearch, setPaymentAccountSearch] = useState('');
   const [viewMode, setViewMode] = useState('all');
   const [{ start: dateFrom, end: dateTo }, setDateRange] = useState(() => getCalendarMonthRange());
   const expensesFetchSeq = useRef(0);
@@ -86,6 +101,10 @@ const Expenses = () => {
     expense_date: new Date().toISOString().split('T')[0],
     notes: ''
   });
+
+  /** Reparto entre varias cuentas de pago (solo al registrar nuevo). */
+  const [splitExpenseMode, setSplitExpenseMode] = useState(false);
+  const [splitLines, setSplitLines] = useState(() => [splitLineEmpty(), splitLineEmpty()]);
 
   useEffect(() => {
     fetchContracts();
@@ -162,6 +181,63 @@ const Expenses = () => {
     }
   };
 
+  const totalAmountCents = useMemo(
+    () => parseAmountToCentsString(formData.amount),
+    [formData.amount]
+  );
+
+  const splitDistributedCents = useMemo(() => {
+    if (!splitExpenseMode) return 0;
+    return splitLines.reduce((s, ln) => s + parseAmountToCentsString(ln.amount), 0);
+  }, [splitExpenseMode, splitLines]);
+
+  const splitSumOk =
+    !splitExpenseMode ||
+    editingExpense ||
+    (splitLines.filter(
+      (l) => String(l.payment_account_id || '').trim() && l.amount !== '' && l.amount != null
+    ).length >= 2 &&
+      Math.abs(splitDistributedCents - totalAmountCents) <= 1 &&
+      totalAmountCents > 0);
+
+  const applyEqualSplit = () => {
+    if (!splitExpenseMode || splitLines.length < 1) return;
+    const c = totalAmountCents;
+    if (c <= 0) {
+      setToast({ message: 'Indique primero el monto total del gasto', type: 'error' });
+      return;
+    }
+    const parts = distributeCentsEvenly(c, splitLines.length);
+    setSplitLines((prev) =>
+      prev.map((ln, i) => ({ ...ln, amount: (parts[i] / 100).toFixed(2) }))
+    );
+  };
+
+  const addSplitLine = () =>
+    setSplitLines((prev) => [...prev, splitLineEmpty()]);
+
+  const removeSplitLine = (idx) => {
+    setSplitLines((prev) =>
+      prev.length <= 2 ? prev : prev.filter((_, i) => i !== idx)
+    );
+  };
+
+  const updateSplitLine = (idx, field, value) => {
+    setSplitLines((prev) =>
+      prev.map((ln, i) => (i === idx ? { ...ln, [field]: value } : ln))
+    );
+  };
+
+  const onToggleSplitExpense = (checked) => {
+    setSplitExpenseMode(checked);
+    if (checked) {
+      setFormData((prev) => ({ ...prev, payment_account_id: '' }));
+      setSplitLines((prev) =>
+        prev.length < 2 ? [splitLineEmpty(), splitLineEmpty()] : prev
+      );
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -169,32 +245,96 @@ const Expenses = () => {
         ? formData.expense_type_other
         : formData.expense_type;
 
-      const payload = {
-        contract_id: formData.contract_id || null,
-        expense_type: expenseType || null,
-        amount: formData.amount ? parseFloat(formData.amount) : null,
-        payment_account_id: formData.payment_account_id || null,
-        business_unit: formData.business_unit || null,
-        expense_date: formData.expense_date,
-        notes: formData.notes || null
-      };
+      if (!editingExpense && splitExpenseMode) {
+        const linesFilled = splitLines.filter(
+          (l) =>
+            String(l.payment_account_id || '').trim() &&
+            l.amount !== '' &&
+            l.amount != null
+        );
+        if (linesFilled.length < 2) {
+          setToast({
+            message: 'En reparto, indique al menos dos cuentas con importe cada una.',
+            type: 'error'
+          });
+          return;
+        }
+        const sumCents = linesFilled.reduce(
+          (s, l) => s + parseAmountToCentsString(l.amount),
+          0
+        );
+        if (Math.abs(sumCents - totalAmountCents) > 1) {
+          setToast({
+            message:
+              'Los importes por cuenta deben sumar exactamente el monto total (máximo 1 centavo de tolerancia por redondeo).',
+            type: 'error'
+          });
+          return;
+        }
+        if (totalAmountCents <= 0) {
+          setToast({ message: 'El monto total debe ser mayor a cero', type: 'error' });
+          return;
+        }
 
-      if (editingExpense) {
-        await updateExpense(editingExpense.id, payload);
-        setToast({ message: 'Gasto actualizado exitosamente', type: 'success' });
+        const amountNum = parseFloat(String(formData.amount).replace(',', '.'));
+        const response = await createExpense({
+          contract_id: formData.contract_id || null,
+          expense_type: expenseType || null,
+          amount: amountNum,
+          business_unit: formData.business_unit || null,
+          expense_date: formData.expense_date,
+          notes: formData.notes || null,
+          splits: linesFilled.map((l) => ({
+            payment_account_id: parseInt(String(l.payment_account_id), 10),
+            amount: parseAmountToCentsString(l.amount) / 100
+          }))
+        });
+        const created = response?.data?.data;
+        setToast({
+          message: Array.isArray(created)
+            ? `${created.length} gastos registrados con el reparto.`
+            : 'Gasto registrado exitosamente',
+          type: 'success'
+        });
       } else {
-        await createExpense(payload);
-        setToast({ message: 'Gasto registrado exitosamente', type: 'success' });
+        const payload = {
+          contract_id: formData.contract_id || null,
+          expense_type: expenseType || null,
+          amount: formData.amount ? parseFloat(String(formData.amount).replace(',', '.')) : null,
+          payment_account_id: formData.payment_account_id || null,
+          business_unit: formData.business_unit || null,
+          expense_date: formData.expense_date,
+          notes: formData.notes || null
+        };
+
+        if (editingExpense) {
+          await updateExpense(editingExpense.id, payload);
+          setToast({ message: 'Gasto actualizado exitosamente', type: 'success' });
+        } else {
+          await createExpense(payload);
+          setToast({ message: 'Gasto registrado exitosamente', type: 'success' });
+        }
       }
+
       setIsModalOpen(false);
       resetForm();
       fetchExpenses();
     } catch (error) {
-      setToast({ message: 'Error al guardar gasto', type: 'error' });
+      const apiErr =
+        error.response?.data?.error ??
+        error.response?.data?.message;
+      const msg =
+        typeof apiErr === 'string' && apiErr.trim()
+          ? apiErr.trim()
+          : 'Error al guardar gasto';
+      setToast({ message: msg, type: 'error' });
     }
   };
 
   const handleEdit = (expense) => {
+    setSplitExpenseMode(false);
+    setSplitLines([splitLineEmpty(), splitLineEmpty()]);
+    setPaymentAccountSearch('');
     setEditingExpense(expense);
     const isOther = expense.expense_type && !EXPENSE_TYPES.find(t => t.value === expense.expense_type);
     setFormData({
@@ -323,6 +463,9 @@ const Expenses = () => {
       notes: ''
     });
     setEditingExpense(null);
+    setSplitExpenseMode(false);
+    setSplitLines([splitLineEmpty(), splitLineEmpty()]);
+    setPaymentAccountSearch('');
   };
 
   const formatCurrency = (amount) => {
@@ -428,6 +571,62 @@ const Expenses = () => {
     value: a.id,
     label: `${a.account_name} (${a.bank_name || '-'})`
   }));
+
+  /** Filtro de texto en selects de cuenta del modal + conservar opciones ya elegidas. */
+  const paymentAccountModalOptions = useMemo(() => {
+    const formatOpt = (a) => ({
+      value: a.id,
+      label: `${a.account_name} (${a.bank_name || '-'})`
+    });
+
+    const q = paymentAccountSearch.trim().toLowerCase();
+    const accountMatchesSearch = (a) => {
+      if (!q) return true;
+      const blob = [
+        a.account_name,
+        a.account_code,
+        a.bank_name,
+        a.business_unit,
+        a.account_type,
+        a.notes
+      ]
+        .filter((x) => x != null && String(x).trim() !== '')
+        .map((x) => String(x).toLowerCase())
+        .join(' ');
+      return blob.includes(q) || String(a.id).includes(q);
+    };
+
+    const filtered = accounts.filter(accountMatchesSearch).map(formatOpt);
+
+    const neededIds = new Set();
+    if (formData.payment_account_id) {
+      neededIds.add(String(formData.payment_account_id));
+    }
+    if (splitExpenseMode && !editingExpense) {
+      splitLines.forEach((ln) => {
+        if (ln.payment_account_id) neededIds.add(String(ln.payment_account_id));
+      });
+    }
+
+    const out = [...filtered];
+    const have = new Set(out.map((o) => String(o.value)));
+    for (const nid of neededIds) {
+      if (have.has(nid)) continue;
+      const acc = accounts.find((a) => String(a.id) === nid);
+      if (acc) {
+        out.unshift(formatOpt(acc));
+        have.add(nid);
+      }
+    }
+    return out;
+  }, [
+    accounts,
+    paymentAccountSearch,
+    formData.payment_account_id,
+    splitExpenseMode,
+    editingExpense,
+    splitLines
+  ]);
 
   const validationLabel = (row) => {
     const v = row.validation_status || 'approved';
@@ -723,7 +922,7 @@ const Expenses = () => {
           resetForm();
         }}
         title={editingExpense ? 'Editar Gasto' : 'Registrar Gasto'}
-        size="md"
+        size={!editingExpense && splitExpenseMode ? 'lg' : 'md'}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -777,12 +976,134 @@ const Expenses = () => {
             required
           />
 
-          <FormSelect
-            label="Cuenta (de la cual se descuenta)"
-            value={formData.payment_account_id}
-            onChange={(e) => setFormData({ ...formData, payment_account_id: e.target.value })}
-            options={accountOptions}
-          />
+          {!editingExpense && (
+            <label className="flex items-start gap-2 rounded-lg border border-gray-200 bg-slate-50 px-3 py-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={splitExpenseMode}
+                onChange={(e) => onToggleSplitExpense(e.target.checked)}
+              />
+              <span className="text-sm text-gray-700">
+                <span className="font-medium text-gray-900">Dividir entre varias cuentas</span>
+                <span className="block text-gray-600 mt-0.5">
+                  Un solo gasto lógico (ej. Teléfono): se registran varias filas sumando exactamente este monto.
+                </span>
+              </span>
+            </label>
+          )}
+
+          <div>
+            <label htmlFor="expense-payment-account-search" className="block text-sm font-medium text-gray-700 mb-1">
+              Buscar cuenta (filtra el listado)
+            </label>
+            <input
+              id="expense-payment-account-search"
+              type="search"
+              placeholder="Ej: Crafter25, BBVA, número de cuenta…"
+              value={paymentAccountSearch}
+              onChange={(e) => setPaymentAccountSearch(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {paymentAccountSearch.trim() && paymentAccountModalOptions.length === 0 && (
+              <p className="mt-1 text-sm text-amber-600">
+                No se encontraron cuentas con ese criterio.
+              </p>
+            )}
+          </div>
+
+          {splitExpenseMode && !editingExpense ? (
+            <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-gray-900">Distribución por cuenta</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    className="!min-h-0"
+                    onClick={applyEqualSplit}
+                  >
+                    Repartir monto igual
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    className="!min-h-0"
+                    onClick={addSplitLine}
+                  >
+                    Agregar cuenta
+                  </Button>
+                </div>
+              </div>
+              {splitLines.map((ln, idx) => (
+                <div
+                  key={idx}
+                  className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+                >
+                  <div className="sm:col-span-7">
+                    <FormSelect
+                      label={idx === 0 ? 'Cuenta (descuenta de)' : ''}
+                      value={ln.payment_account_id}
+                      onChange={(e) => updateSplitLine(idx, 'payment_account_id', e.target.value)}
+                      options={paymentAccountModalOptions}
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <FormInput
+                      label={idx === 0 ? 'Importe' : ''}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={ln.amount}
+                      onChange={(e) => updateSplitLine(idx, 'amount', e.target.value)}
+                      className="!mb-0"
+                    />
+                  </div>
+                  <div className="sm:col-span-1 flex pb-6 sm:pb-0 justify-end sm:justify-center">
+                    {splitLines.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => removeSplitLine(idx)}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium whitespace-nowrap"
+                        title="Quitar línea"
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <p
+                className={`text-sm tabular-nums ${
+                  totalAmountCents <= 0
+                    ? 'text-gray-500'
+                    : Math.abs(splitDistributedCents - totalAmountCents) <= 1
+                      ? 'text-emerald-700'
+                      : 'text-red-600'
+                }`}
+              >
+                Suma distribuida: {formatCurrency(splitDistributedCents / 100)} · Monto total:{' '}
+                {formatCurrency(totalAmountCents / 100)}
+                {totalAmountCents > 0 &&
+                  Math.abs(splitDistributedCents - totalAmountCents) > 1 && (
+                    <span>
+                      {' '}
+                      · Diferencia:{' '}
+                      {formatCurrency((splitDistributedCents - totalAmountCents) / 100)}
+                    </span>
+                  )}
+              </p>
+            </div>
+          ) : (
+            <FormSelect
+              label="Cuenta (de la cual se descuenta)"
+              value={formData.payment_account_id}
+              onChange={(e) => setFormData({ ...formData, payment_account_id: e.target.value })}
+              options={paymentAccountModalOptions}
+            />
+          )}
 
           <FormInput
             label="Unidad de Negocio"
@@ -810,7 +1131,7 @@ const Expenses = () => {
             <Button variant="secondary" type="button" onClick={() => setIsModalOpen(false)}>
               Cancelar
             </Button>
-            <Button variant="primary" type="submit">
+            <Button variant="primary" type="submit" disabled={!splitSumOk}>
               {editingExpense ? 'Actualizar' : 'Guardar'}
             </Button>
           </div>

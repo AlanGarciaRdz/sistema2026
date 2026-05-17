@@ -5,7 +5,7 @@ import { getMonthToDateRange } from '../utils/formatDateLocal';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Users, FileCheck, FileText, DollarSign, Receipt, CreditCard, Landmark } from 'lucide-react';
+import { Users, DollarSign, Receipt, CreditCard, Landmark, Wallet } from 'lucide-react';
 
 const Dashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -118,13 +118,19 @@ const Dashboard = () => {
           )}
         </div>
         <p className="mt-2 text-xs text-gray-500">
-          Sin fechas en la barra: ingresos y egresos usan el mes calendario de tu equipo (igual que las páginas
-          Ingresos y Egresos); saldos por cuenta = todo el tiempo. Con fechas: todo al período elegido.
+          <strong>Sin fechas:</strong> ingresos y egresos son del <strong>mes calendario hasta hoy</strong> (día
+          1 del mes actual hasta la fecha de hoy en tu equipo). Total clientes y por cobrar son valores
+          actuales. Los saldos por banco / unidad de negocio son <strong>todo el tiempo</strong>.
+          <br />
+          <strong className="mt-1 inline-block">
+            Con inicio y fin en la barra:
+          </strong>{' '}
+          ingresos, egresos y saldos por cuenta se calculan solo en ese período.
         </p>
       </div>
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -133,30 +139,6 @@ const Dashboard = () => {
             </div>
             <div className="bg-blue-100 p-3 rounded-lg">
               <Users className="text-blue-600" size={24} />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Contratos Activos</p>
-              <p className="text-3xl font-bold text-gray-900">{metrics.activeContracts}</p>
-            </div>
-            <div className="bg-green-100 p-3 rounded-lg">
-              <FileCheck className="text-green-600" size={24} />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Cotizaciones Pendientes</p>
-              <p className="text-3xl font-bold text-gray-900">{metrics.pendingQuotes}</p>
-            </div>
-            <div className="bg-yellow-100 p-3 rounded-lg">
-              <FileText className="text-yellow-600" size={24} />
             </div>
           </div>
         </div>
@@ -181,6 +163,21 @@ const Dashboard = () => {
             </div>
             <div className="bg-red-100 p-3 rounded-lg">
               <Receipt className="text-red-600" size={24} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 mb-1">Por cobrar</p>
+              <p className="text-2xl font-bold text-amber-900 tabular-nums">
+                {formatCurrency(metrics.totalDueToCollect)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Suma de contratos en estado &ldquo;Por cobrar&rdquo;</p>
+            </div>
+            <div className="bg-amber-100 p-3 rounded-lg">
+              <Wallet className="text-amber-700" size={24} />
             </div>
           </div>
         </div>

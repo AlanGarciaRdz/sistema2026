@@ -88,6 +88,7 @@ const Expenses = () => {
   /** Lista de gastos a validar en el modal (uno o varios); null = cerrado */
   const [validateTargets, setValidateTargets] = useState(null);
   const [validateAccountId, setValidateAccountId] = useState('');
+  const [validateModalAccountSearch, setValidateModalAccountSearch] = useState('');
   const [validatingBulk, setValidatingBulk] = useState(false);
   /** IDs marcados en la vista pendiente (chkbox) */
   const [selectedPendingIds, setSelectedPendingIds] = useState([]);
@@ -353,6 +354,7 @@ const Expenses = () => {
   const openValidateModal = (expense) => {
     setValidateTargets([expense]);
     setValidateAccountId('');
+    setValidateModalAccountSearch('');
   };
 
   const openBulkValidateModal = () => {
@@ -363,6 +365,7 @@ const Expenses = () => {
     }
     setValidateTargets(rows);
     setValidateAccountId('');
+    setValidateModalAccountSearch('');
   };
 
   const toggleSelectPending = (id) => {
@@ -413,6 +416,7 @@ const Expenses = () => {
         });
       }
       setValidateTargets(null);
+      setValidateModalAccountSearch('');
       const idSet = new Set(validatedIds);
       setSelectedPendingIds((prev) => prev.filter((id) => !idSet.has(id)));
       fetchExpenses();
@@ -567,12 +571,7 @@ const Expenses = () => {
     return sections;
   }, [filteredExpenses]);
 
-  const accountOptions = accounts.map((a) => ({
-    value: a.id,
-    label: `${a.account_name} (${a.bank_name || '-'})`
-  }));
-
-  /** Filtro de texto en selects de cuenta del modal + conservar opciones ya elegidas. */
+  /** Filtro de texto en selects de cuenta — modal Registrar/Editar egreso + reparto. */
   const paymentAccountModalOptions = useMemo(() => {
     const formatOpt = (a) => ({
       value: a.id,
@@ -627,6 +626,43 @@ const Expenses = () => {
     editingExpense,
     splitLines
   ]);
+
+  /** Filtro de texto + conservar cuenta elegida — modal Validar gasto(s). */
+  const validateAccountModalOptions = useMemo(() => {
+    const formatOpt = (a) => ({
+      value: a.id,
+      label: `${a.account_name} (${a.bank_name || '-'})`
+    });
+
+    const q = validateModalAccountSearch.trim().toLowerCase();
+    const accountMatchesSearch = (a) => {
+      if (!q) return true;
+      const blob = [
+        a.account_name,
+        a.account_code,
+        a.bank_name,
+        a.business_unit,
+        a.account_type,
+        a.notes
+      ]
+        .filter((x) => x != null && String(x).trim() !== '')
+        .map((x) => String(x).toLowerCase())
+        .join(' ');
+      return blob.includes(q) || String(a.id).includes(q);
+    };
+
+    const filtered = accounts.filter(accountMatchesSearch).map(formatOpt);
+    const out = [...filtered];
+    const have = new Set(out.map((o) => String(o.value)));
+    const id = validateAccountId;
+    if (id && !have.has(String(id))) {
+      const acc = accounts.find((a) => String(a.id) === String(id));
+      if (acc) {
+        out.unshift(formatOpt(acc));
+      }
+    }
+    return out;
+  }, [accounts, validateModalAccountSearch, validateAccountId]);
 
   const validationLabel = (row) => {
     const v = row.validation_status || 'approved';
@@ -1140,7 +1176,11 @@ const Expenses = () => {
 
       <Modal
         isOpen={!!validateTargets?.length}
-        onClose={() => !validatingBulk && setValidateTargets(null)}
+        onClose={() => {
+          if (validatingBulk) return;
+          setValidateTargets(null);
+          setValidateModalAccountSearch('');
+        }}
         title={
           validateTargets?.length && validateTargets.length > 1
             ? `Validar ${validateTargets.length} gastos`
@@ -1180,19 +1220,45 @@ const Expenses = () => {
                 )}
               </p>
             )}
-            <FormSelect
-              label="Cuenta (donde se descuenta)"
-              value={validateAccountId}
-              onChange={(e) => setValidateAccountId(e.target.value)}
-              options={accountOptions}
-              required
-            />
+            <div>
+              <label
+                htmlFor="validate-expense-account-search"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Buscar cuenta (filtra el listado)
+              </label>
+              <input
+                id="validate-expense-account-search"
+                type="search"
+                placeholder="Nombre, código, banco…"
+                value={validateModalAccountSearch}
+                onChange={(e) => setValidateModalAccountSearch(e.target.value)}
+                disabled={validatingBulk}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
+              />
+              {validateModalAccountSearch.trim() &&
+                validateAccountModalOptions.length === 0 && (
+                  <p className="mt-1 text-sm text-amber-600 mb-2">
+                    No se encontraron cuentas con ese criterio.
+                  </p>
+                )}
+              <FormSelect
+                label="Cuenta (donde se descuenta)"
+                value={validateAccountId}
+                onChange={(e) => setValidateAccountId(e.target.value)}
+                options={validateAccountModalOptions}
+                required
+              />
+            </div>
             <div className="flex justify-end gap-3 pt-4 border-t">
               <Button
                 variant="secondary"
                 type="button"
                 disabled={validatingBulk}
-                onClick={() => setValidateTargets(null)}
+                onClick={() => {
+                  setValidateTargets(null);
+                  setValidateModalAccountSearch('');
+                }}
               >
                 Cancelar
               </Button>

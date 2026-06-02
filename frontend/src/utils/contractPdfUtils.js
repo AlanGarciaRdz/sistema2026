@@ -37,35 +37,67 @@ function formatDateOnly(dateStr) {
  * - anticipo, pendiente (desde pagos; si no hay pagos: anticipo=0, pendiente=total)
  * - ACC_unidad, sanitarios_unidad, tvdvd_unidad, microfono_unidad, estereo_unidad
  */
-function calcAnticipoPendienteFromPayments(payments, totalVal) {
+const IVA_RATE = 0.16;
+
+/** Montos de IVA: el precio capturado es subtotal; IVA = 16% del subtotal. */
+export function calcIvaAmounts(subtotal, includeIva) {
+  const base = Math.round((parseFloat(subtotal) || 0) * 100) / 100;
+  if (!includeIva) {
+    return { includeIva: false, subtotal: base, iva: 0, grandTotal: base };
+  }
+  const iva = Math.round(base * IVA_RATE * 100) / 100;
+  const grandTotal = Math.round((base + iva) * 100) / 100;
+  return { includeIva: true, subtotal: base, iva, grandTotal };
+}
+
+function calcAnticipoPendienteFromPayments(payments, amountDue) {
+  const due = Math.round((parseFloat(amountDue) || 0) * 100) / 100;
   const forContract = payments || [];
   if (forContract.length === 0) {
-    return { anticipo: 0, pendiente: totalVal };
+    return { anticipo: 0, pendiente: due, saldo: due };
   }
   const totalPagado = forContract.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  const anticipo = totalPagado;
-  const pendiente = Math.max(0, totalVal - totalPagado);
-  return { anticipo, pendiente };
+  const anticipo = Math.round(totalPagado * 100) / 100;
+  const saldo = Math.max(0, Math.round((due - anticipo) * 100) / 100);
+  return { anticipo, pendiente: saldo, saldo };
+}
+
+function buildPaymentFields(subtotal, includeIva, payments) {
+  const ivaCalc = calcIvaAmounts(subtotal, includeIva);
+  const due = ivaCalc.grandTotal;
+  const pay = calcAnticipoPendienteFromPayments(payments, due);
+  const pendienteBase = ivaCalc.includeIva
+    ? Math.max(0, Math.round((ivaCalc.subtotal - pay.anticipo) * 100) / 100)
+    : pay.pendiente;
+
+  return {
+    includeIva: ivaCalc.includeIva,
+    subtotal: ivaCalc.subtotal,
+    iva: ivaCalc.iva,
+    grandTotal: ivaCalc.grandTotal,
+    total: ivaCalc.subtotal,
+    anticipo: pay.anticipo,
+    pendiente: pendienteBase,
+    saldo: pay.saldo
+  };
 }
 
 export async function buildPdfInfoFromForm(formState) {
   const isContrato = formState.mode === 'contrato';
   const fechaSalida = isContrato ? formState.departure : formState.serviceDate;
   const horaSalida = isContrato ? formState.departureTime : formState.serviceTime;
-  const totalVal = parseFloat(formState.total) || 0;
+  const includeIva = Boolean(formState.includeIva);
+  const subtotalVal = parseFloat(formState.total) || 0;
 
-  let anticipo = 0;
-  let pendiente = totalVal;
+  let payments = [];
   const contractNumber = formState.folio;
   if (contractNumber) {
     try {
       const res = await getPaymentsByContractNumber(contractNumber);
-      const payments = res?.data?.data || [];
-      const calc = calcAnticipoPendienteFromPayments(payments, totalVal);
-      anticipo = calc.anticipo;
-      pendiente = calc.pendiente;
+      payments = res?.data?.data || [];
     } catch (_) {}
   }
+  const payFields = buildPaymentFields(subtotalVal, includeIva, payments);
 
   return {
     nombreContrato: formState.folio,
@@ -83,9 +115,7 @@ export async function buildPdfInfoFromForm(formState) {
     notes: formState.notes || '',
     unitType: formState.unitType || '',
     capacity: formState.capacity || '',
-    total: totalVal,
-    anticipo,
-    pendiente,
+    ...payFields,
     fechaSalida: formatDateOnly(fechaSalida),
     horaSalida: horaSalida || 'N/A',
     fechaRegreso: formatDateOnly(formState.returnDate),
@@ -105,28 +135,26 @@ export async function buildPdfInfoFromRow(row) {
 
   const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
   const endStr = row.end_date ? String(row.end_date).slice(0, 10) : '';
-  const totalVal = parseFloat(row.total_amount) || 0;
+  const includeIva = Boolean(notesData.includeIva);
+  const subtotalVal = parseFloat(row.total_amount) || 0;
 
-  let anticipo = 0;
-  let pendiente = totalVal;
+  let payments = [];
   const contractNumber = row.contract_number;
   if (contractNumber) {
     try {
       const res = await getPaymentsByContractNumber(contractNumber);
-      const payments = res?.data?.data || [];
-      const calc = calcAnticipoPendienteFromPayments(payments, totalVal);
-      anticipo = calc.anticipo;
-      pendiente = calc.pendiente;
+      payments = res?.data?.data || [];
     } catch (_) {}
   }
+  const payFields = buildPaymentFields(subtotalVal, includeIva, payments);
 
   return {
     nombreContrato: row.contract_number,
     fechaContrato: formatDateOnly(startStr),
     contactName: notesData.contactName || row.client_name || '',
-    contactPhone: notesData.contactPhone || '',
+    contactPhone: notesData.contactPhone || row.client_phone || '',
     contactEncargado: row.client_name || 'N/A',
-    contactEncargadoTel: notesData.contactPhone || 'N/A',
+    contactEncargadoTel: notesData.contactPhone || row.client_phone || 'N/A',
     origin: row.origin || '',
     origin_maps: row.origin_maps || '',
     destination: row.destination || '',
@@ -135,9 +163,7 @@ export async function buildPdfInfoFromRow(row) {
     notes: notesData.notes || '',
     unitType: notesData.unitType || '',
     capacity: row.passenger_count ?? '',
-    total: totalVal,
-    anticipo,
-    pendiente,
+    ...payFields,
     fechaSalida: formatDateOnly(startStr),
     horaSalida: notesData.departureTime || notesData.serviceTime || 'N/A',
     fechaRegreso: formatDateOnly(endStr),

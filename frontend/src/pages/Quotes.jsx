@@ -180,8 +180,11 @@ const Quotes = () => {
       // Try to parse as JSON first (new format)
       const data = JSON.parse(notes);
       return {
+        client_name: data.client_name || '',
         clientName: data.client_name || '',
         days: data.days || [],
+        trip: data.trip || null,
+        selectedVehicleIndex: data.selectedVehicleIndex,
         distances: data.distances || {},
         costs: data.costs || {},
         results: data.results || null,
@@ -227,6 +230,8 @@ const Quotes = () => {
       const completeQuoteData = {
         client_name: quoteData.client_name,
         client_id: quoteData.client_id,
+        trip: quoteData.trip || null,
+        selectedVehicleIndex: quoteData.selectedVehicleIndex ?? null,
         days: quoteData.days,
         distances: quoteData.distances,
         costs: quoteData.costs,
@@ -238,18 +243,39 @@ const Quotes = () => {
         daysNights: quoteData.daysNights
       };
 
-      // Prepare data for API
+      const trip = quoteData.trip || {};
+      const daysArr =
+        quoteData.days && quoteData.days.length > 0
+          ? quoteData.days
+          : [{ date: '', destinations: ['', ''] }];
+      const ix = quoteData.selectedVehicleIndex ?? 0;
+      const selQ =
+        quoteData.results?.quotations?.[ix] || quoteData.results?.quotations?.[0];
+
+      const firstDest = daysArr[0]?.destinations || [];
+
       const apiData = {
         client_id: quoteData.client_id || null,
-        origin: quoteData.days[0]?.destinations[0] || '',
-        destination: quoteData.days[quoteData.days.length - 1]?.destinations[quoteData.days[quoteData.days.length - 1].destinations.length - 1] || '',
-        start_date: quoteData.days[0]?.date || null,
-        end_date: quoteData.days[quoteData.days.length - 1]?.date || null,
+        origin: trip.origin || firstDest[0] || '',
+        destination:
+          trip.destination ||
+          (firstDest.length >= 2 ? firstDest[1] : '') ||
+          '',
+        start_date:
+          trip.dateStart || daysArr[0]?.date || null,
+        end_date:
+          trip.roundTrip
+            ? (trip.dateEnd || daysArr[daysArr.length - 1]?.date || null)
+            : (trip.dateStart || daysArr[0]?.date || null),
         event_type: 'Cotización',
-        itinerary: JSON.stringify(quoteData.days),
+        itinerary: JSON.stringify(daysArr),
         num_units: 1,
-        passenger_count: quoteData.results?.quotations[0]?.capacity || 0,
-        total_amount: parseFloat(quoteData.agreedAmount) || quoteData.results?.quotations[0]?.costs.total || 0,
+        passenger_count: selQ?.capacity || quoteData.results?.quotations?.[0]?.capacity || 0,
+        total_amount:
+          parseFloat(quoteData.agreedAmount) ||
+          selQ?.costs?.total ||
+          quoteData.results?.quotations?.[0]?.costs?.total ||
+          0,
         status: 'Pendiente',
         notes: JSON.stringify(completeQuoteData) // Save everything as JSON
       };

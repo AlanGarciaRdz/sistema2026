@@ -5,7 +5,8 @@ import { getMonthToDateRange } from '../utils/formatDateLocal';
 import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Users, DollarSign, Receipt, CreditCard, Landmark, Wallet } from 'lucide-react';
+import AccountsBusinessUnitStackedBar from '../components/AccountsBusinessUnitStackedBar';
+import { Users, DollarSign, Receipt, CreditCard, Landmark, Wallet, Bus, BadgePercent, TrendingUp, Building2 } from 'lucide-react';
 
 const Dashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,6 +82,18 @@ const Dashboard = () => {
     ? `${dateStart} a ${dateEnd}`
     : 'Todo el tiempo';
 
+  const totalTrips = metrics.totalTrips ?? 0;
+  const estimatedAvgTicket = metrics.estimatedAvgTicket ?? 0;
+  const grossMargin = metrics.grossMargin ?? 0;
+  const periodContractExpenses = metrics.periodContractExpenses ?? 0;
+  const operatingMarginExpenses = metrics.operatingMarginExpenses ?? 0;
+  const tripsCardLabel = hasDateRange ? 'Viajes totales (periodo)' : 'Viajes totales (mes hasta hoy)';
+  const ticketCardLabel = hasDateRange
+    ? 'Ticket promedio por valor de contrato (periodo)'
+    : 'Ticket promedio por valor de contrato (mes hasta hoy)';
+  const grossMarginLabel = hasDateRange ? 'Margen bruto (periodo)' : 'Margen bruto (mes hasta hoy)';
+  const operatingMarginLabel = hasDateRange ? 'Margen operativo (periodo)' : 'Margen operativo (mes hasta hoy)';
+
   return (
     <div className="p-6">
       <Header title="Dashboard" />
@@ -126,6 +139,16 @@ const Dashboard = () => {
             Con inicio y fin en la barra:
           </strong>{' '}
           ingresos, egresos y saldos por cuenta se calculan solo en ese período.
+          <br />
+          <strong className="mt-1 inline-block">Viajes y ticket:</strong> los viajes cuentan contratos con fecha de
+          inicio en el período; el ticket promedio usa el <strong>monto del contrato</strong> (campo total), no solo lo
+          cobrado.
+          <br />
+          <strong className="mt-1 inline-block">Margen bruto:</strong> por cada viaje del período, valor del contrato
+          menos egresos ligados a ese contrato; se suma el resultado de todos.
+          <br />
+          <strong className="mt-1 inline-block">Margen operativo:</strong> por ahora, suma de egresos del período{' '}
+          <strong>sin contrato</strong> (gastos generales / overhead).
         </p>
       </div>
 
@@ -183,6 +206,83 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Viajes y ticket (mismo período que ingresos) — fila debajo */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-gray-600 mb-1">{tripsCardLabel}</p>
+              <p className="text-3xl font-bold text-gray-900 tabular-nums">{totalTrips}</p>
+              <p className="text-xs text-gray-500 mt-1 leading-snug">
+                Contratos con fecha de inicio en el período (independiente de cobros).
+              </p>
+            </div>
+            <div className="bg-teal-100 p-3 rounded-lg shrink-0">
+              <Bus className="text-teal-700" size={24} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-gray-600 mb-1">{ticketCardLabel}</p>
+              <p className="text-2xl font-bold text-gray-900 tabular-nums">
+                {totalTrips > 0 ? formatCurrency(estimatedAvgTicket) : '—'}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 leading-snug">
+                {totalTrips > 0
+                  ? `${formatCurrency(metrics.periodContractsValue ?? 0)} valor contratado ÷ ${totalTrips} viajes`
+                  : 'Sin contratos con fecha de inicio en el período; no se puede calcular.'}
+              </p>
+            </div>
+            <div className="bg-indigo-100 p-3 rounded-lg shrink-0">
+              <BadgePercent className="text-indigo-700" size={24} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-gray-600 mb-1">{grossMarginLabel}</p>
+              <p
+                className={`text-2xl font-bold tabular-nums ${
+                  grossMargin >= 0 ? 'text-emerald-700' : 'text-red-600'
+                }`}
+              >
+                {totalTrips > 0 ? formatCurrency(grossMargin) : '—'}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 leading-snug">
+                {totalTrips > 0
+                  ? `${formatCurrency(metrics.periodContractsValue ?? 0)} contratado − ${formatCurrency(periodContractExpenses)} egresos de viaje`
+                  : 'Sin viajes con inicio en el período.'}
+              </p>
+            </div>
+            <div className="bg-emerald-100 p-3 rounded-lg shrink-0">
+              <TrendingUp className="text-emerald-700" size={24} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-gray-600 mb-1">{operatingMarginLabel}</p>
+              <p className="text-2xl font-bold text-orange-700 tabular-nums">
+                {formatCurrency(operatingMarginExpenses)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 leading-snug">
+                Egresos del período sin contrato asignado (excluye transferencias entre cuentas).
+              </p>
+            </div>
+            <div className="bg-orange-100 p-3 rounded-lg shrink-0">
+              <Building2 className="text-orange-700" size={24} />
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Saldo agrupado por banco / institución */}
       {accountsByBank.length > 0 && (
         <div className="mb-8">
@@ -229,6 +329,10 @@ const Dashboard = () => {
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Cuentas por Unidad de Negocio</h2>
           <p className="text-sm text-gray-500 mb-4">{accountsSubtitle}</p>
+          <AccountsBusinessUnitStackedBar
+            accountsByBusinessUnit={accountsByBusinessUnit}
+            formatCurrency={formatCurrency}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {accountsByBusinessUnit.map((unit) => (
               <div key={unit.businessUnit} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -284,6 +388,9 @@ const Dashboard = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(contract.total_amount)}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                        contract.status === 'Cotización enviada' ? 'bg-sky-100 text-sky-900' :
+                        contract.status === 'Orden de compra' ? 'bg-indigo-100 text-indigo-900' :
+                        contract.status === 'Factura enviada' ? 'bg-teal-100 text-teal-900' :
                         contract.status === 'Agendado' ? 'bg-green-100 text-green-800' :
                         contract.status === 'Realizado' ? 'bg-blue-100 text-blue-800' :
                         contract.status === 'Por cobrar' ? 'bg-amber-100 text-amber-900' :

@@ -41,17 +41,35 @@ export function toYmdLocal(value) {
   return `${y}-${m}-${d}`;
 }
 
-export function formatDateLocal(value) {
-  if (value == null || value === '') return '-';
+/** Fecha calendario local (sin desfase UTC en YYYY-MM-DD). */
+function parseDateLocal(value) {
+  if (value == null || value === '') return null;
   const s = String(value).trim();
   const ymd = s.match(/^(\d{4}-\d{2}-\d{2})/);
   if (ymd) {
     const [y, m, d] = ymd[1].split('-').map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString('es-MX');
+    const date = new Date(y, m - 1, d);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
   const t = new Date(s);
-  if (!Number.isNaN(t.getTime())) return t.toLocaleDateString('es-MX');
-  return '-';
+  return Number.isNaN(t.getTime()) ? null : t;
+}
+
+export function formatDateLocal(value) {
+  const date = parseDateLocal(value);
+  if (!date) return '-';
+  return date.toLocaleDateString('es-MX');
+}
+
+/** Ej. "Lunes 25/05/2026" — día de la semana en texto + dd/mm/aaaa. */
+export function formatDateWithWeekdayLocal(value) {
+  const date = parseDateLocal(value);
+  if (!date) return '';
+  const weekday = date.toLocaleDateString('es-MX', { weekday: 'long' });
+  const dayName = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  const pad = (n) => String(n).padStart(2, '0');
+  const dmY = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+  return `${dayName} ${dmY}`;
 }
 
 /**

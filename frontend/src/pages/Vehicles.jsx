@@ -8,6 +8,7 @@ import FormSelect from '../components/FormSelect';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
+import { FileText } from 'lucide-react';
 
 const Vehicles = () => {
   const [vehicles, setVehicles] = useState([]);
@@ -24,6 +25,7 @@ const Vehicles = () => {
     license_plate: '',
     passenger_capacity: '',
     fuel_type: '',
+    drivedocs: '',
     status: 'Active'
   });
 
@@ -72,6 +74,7 @@ const Vehicles = () => {
       license_plate: vehicle.license_plate || '',
       passenger_capacity: vehicle.passenger_capacity || '',
       fuel_type: vehicle.fuel_type || '',
+      drivedocs: vehicle.drivedocs || '',
       status: vehicle.status || 'Active'
     });
     setIsModalOpen(true);
@@ -99,9 +102,20 @@ const Vehicles = () => {
       license_plate: '',
       passenger_capacity: '',
       fuel_type: '',
+      drivedocs: '',
       status: 'Active'
     });
     setEditingVehicle(null);
+  };
+
+  const openDocumentationLink = (url) => {
+    if (!url) return;
+    const s = String(url).trim();
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      window.open(s, '_blank', 'noopener,noreferrer');
+    } else {
+      alert('Documentación: ' + s);
+    }
   };
 
   const columns = [
@@ -133,12 +147,27 @@ const Vehicles = () => {
       <Header
         title="Vehículos"
         buttonText="+ Nuevo Vehículo"
-        onButtonClick={() => setIsModalOpen(true)}
+        onButtonClick={() => {
+          resetForm();
+          setIsModalOpen(true);
+        }}
       />
 
       <Table
         columns={columns}
         data={vehicles}
+        customActions={(row) =>
+          row.drivedocs ? (
+            <button
+              type="button"
+              onClick={() => openDocumentationLink(row.drivedocs)}
+              className="text-green-600 hover:text-green-900 transition-colors p-2 rounded-lg hover:bg-green-50"
+              title="Documentación (Google Drive)"
+            >
+              <FileText size={18} />
+            </button>
+          ) : null
+        }
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
@@ -211,6 +240,14 @@ const Vehicles = () => {
                 { value: 'Maintenance', label: 'Mantenimiento' },
                 { value: 'Inactive', label: 'Inactivo' }
               ]}
+            />
+            <FormInput
+              label="Documentación (Google Drive)"
+              id="drivedocs"
+              value={formData.drivedocs}
+              onChange={(e) => setFormData({ ...formData, drivedocs: e.target.value })}
+              placeholder="Pólizas, facturas, verificación… pegue el enlace de la carpeta o archivo"
+              className="col-span-2"
             />
           </div>
           <div className="flex justify-end gap-3 mt-6">

@@ -33,6 +33,46 @@ const getCalendarMonthRange = (d = new Date()) => {
   return { start, end };
 };
 
+const formatPaymentAccountOpt = (a) => ({
+  value: a.id,
+  label: `${a.account_name} (${a.bank_name || '—'})`
+});
+
+/** Texto searchable en filtros de cuentas (alineado con Egresos). */
+const paymentAccountMatchesQuery = (a, qNorm) => {
+  if (!qNorm) return true;
+  const blob = [
+    a.account_name,
+    a.account_code,
+    a.bank_name,
+    a.business_unit,
+    a.account_type,
+    a.notes
+  ]
+    .filter((x) => x != null && String(x).trim() !== '')
+    .map((x) => String(x).toLowerCase())
+    .join(' ');
+  return blob.includes(qNorm) || String(a.id).includes(qNorm);
+};
+
+/** Opciones `{ value, label }`; conserva IDs ya elegidos fuera del filtro. */
+const filteredPaymentAccountOpts = (accounts, searchRaw, preserveIds) => {
+  const q = searchRaw.trim().toLowerCase();
+  let filtered = accounts
+    .filter((a) => paymentAccountMatchesQuery(a, q))
+    .map(formatPaymentAccountOpt);
+  const have = new Set(filtered.map((o) => String(o.value)));
+  for (const pid of preserveIds) {
+    if (!pid || have.has(String(pid))) continue;
+    const acc = accounts.find((x) => String(x.id) === String(pid));
+    if (acc) {
+      filtered = [formatPaymentAccountOpt(acc), ...filtered];
+      have.add(String(pid));
+    }
+  }
+  return filtered;
+};
+
 const Payments = () => {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +90,9 @@ const Payments = () => {
   const [quotes, setQuotes] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  
+  const [incomeModalAccountSearch, setIncomeModalAccountSearch] = useState('');
+  const [transferModalAccountSearch, setTransferModalAccountSearch] = useState('');
+
   const [sourceSearch, setSourceSearch] = useState('');
   const [tableSearch, setTableSearch] = useState('');
   const [{ start: payDateFrom, end: payDateTo }, setPayDateRange] = useState(getCalendarMonthRange);
@@ -112,6 +154,7 @@ const Payments = () => {
   };
 
   const openTransferModal = () => {
+    setTransferModalAccountSearch('');
     setTransferForm({
       fromAccountId: '',
       toAccountId: '',
@@ -145,6 +188,7 @@ const Payments = () => {
       });
       setToast({ message: 'Transferencia registrada (egreso en origen, ingreso en destino)', type: 'success' });
       setIsTransferModalOpen(false);
+      setTransferModalAccountSearch('');
       fetchPayments();
     } catch (error) {
       console.error('Error transfer:', error);
@@ -174,6 +218,7 @@ const Payments = () => {
   const handleOpenModal = () => {
     setEditingPayment(null);
     setSourceSearch('');
+    setIncomeModalAccountSearch('');
     setFormData({
       sourceType: 'quote',
       sourceId: '',
@@ -205,6 +250,7 @@ const Payments = () => {
     }
 
     setEditingPayment(payment);
+    setIncomeModalAccountSearch('');
     setFormData({
       sourceType: sourceType,
       sourceId: String(sourceId),
@@ -264,6 +310,7 @@ const Payments = () => {
       
       setIsModalOpen(false);
       setEditingPayment(null);
+      setIncomeModalAccountSearch('');
       fetchPayments();
       
       // Generate receipt automatically
@@ -510,6 +557,26 @@ const Payments = () => {
     [filteredPayments]
   );
 
+  const incomeAccountDropdownOptions = useMemo(
+    () =>
+      filteredPaymentAccountOpts(accounts, incomeModalAccountSearch, [formData.accountId]),
+    [accounts, incomeModalAccountSearch, formData.accountId]
+  );
+
+  const transferAccountDropdownOptions = useMemo(
+    () =>
+      filteredPaymentAccountOpts(accounts, transferModalAccountSearch, [
+        transferForm.fromAccountId,
+        transferForm.toAccountId
+      ]),
+    [
+      accounts,
+      transferModalAccountSearch,
+      transferForm.fromAccountId,
+      transferForm.toAccountId
+    ]
+  );
+
   const columns = [
         { 
       header: 'Contrato', 
@@ -611,11 +678,6 @@ const Payments = () => {
 
   if (loading) return <Loading />;
 
-  const accountSelectOptions = accounts.map((account) => ({
-    value: account.id,
-    label: `${account.account_name} (${account.bank_name || '—'})`
-  }));
-
   return (
     <div className="p-6">
       <Header title="Ingresos" buttonText="+ Registrar Ingreso" onButtonClick={handleOpenModal}>
@@ -712,6 +774,7 @@ const Payments = () => {
         onClose={() => {
           setIsModalOpen(false);
           setEditingPayment(null);
+          setIncomeModalAccountSearch('');
         }}
         title={editingPayment ? "Editar Pago" : "Registrar Nuevo Pago"}
         size="lg"
@@ -854,16 +917,33 @@ const Payments = () => {
               required
             />
 
-            {/* Account */}
-            <FormSelect
-              label="Cuenta"
-              value={formData.accountId}
-              onChange={(e) => setFormData({ ...formData, accountId: e.target.value })}
-              options={accounts.map(account => ({
-                value: account.id,
-                label: `${account.account_name} (${account.bank_name})`
-              }))}
-            />
+            <div>
+              <label
+                htmlFor="income-modal-account-search"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Buscar cuenta (filtra el listado)
+              </label>
+              <input
+                id="income-modal-account-search"
+                type="search"
+                placeholder="Nombre, código, banco…"
+                value={incomeModalAccountSearch}
+                onChange={(e) => setIncomeModalAccountSearch(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
+              />
+              {incomeModalAccountSearch.trim() && incomeAccountDropdownOptions.length === 0 && (
+                <p className="mt-1 text-sm text-amber-600 mb-2">
+                  No se encontraron cuentas con ese criterio.
+                </p>
+              )}
+              <FormSelect
+                label="Cuenta"
+                value={formData.accountId}
+                onChange={(e) => setFormData({ ...formData, accountId: e.target.value })}
+                options={incomeAccountDropdownOptions}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -902,7 +982,10 @@ const Payments = () => {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => {
+                setIsModalOpen(false);
+                setIncomeModalAccountSearch('');
+              }}
             >
               Cancelar
             </Button>
@@ -915,7 +998,10 @@ const Payments = () => {
 
       <Modal
         isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          setTransferModalAccountSearch('');
+        }}
         title="Transferencia entre cuentas"
         size="md"
       >
@@ -925,13 +1011,34 @@ const Payments = () => {
             destino. No cuenta como ingreso de operación en el dashboard (solo mueve saldo entre
             cuentas). También aparece un egreso en Egresos vinculado a la misma operación.
           </p>
+          <div>
+            <label
+              htmlFor="transfer-modal-account-search"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
+              Buscar cuenta (filtra origen y destino)
+            </label>
+            <input
+              id="transfer-modal-account-search"
+              type="search"
+              placeholder="Nombre, código, banco…"
+              value={transferModalAccountSearch}
+              onChange={(e) => setTransferModalAccountSearch(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {transferModalAccountSearch.trim() && transferAccountDropdownOptions.length === 0 && (
+              <p className="mt-1 text-sm text-amber-600">
+                No se encontraron cuentas con ese criterio.
+              </p>
+            )}
+          </div>
           <FormSelect
             label="Cuenta origen (sale el dinero)"
             value={transferForm.fromAccountId}
             onChange={(e) =>
               setTransferForm({ ...transferForm, fromAccountId: e.target.value })
             }
-            options={accountSelectOptions}
+            options={transferAccountDropdownOptions}
             required
           />
           <FormSelect
@@ -940,7 +1047,7 @@ const Payments = () => {
             onChange={(e) =>
               setTransferForm({ ...transferForm, toAccountId: e.target.value })
             }
-            options={accountSelectOptions}
+            options={transferAccountDropdownOptions}
             required
           />
           <div className="grid grid-cols-2 gap-4">
@@ -976,7 +1083,10 @@ const Payments = () => {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setIsTransferModalOpen(false)}
+              onClick={() => {
+                setIsTransferModalOpen(false);
+                setTransferModalAccountSearch('');
+              }}
             >
               Cancelar
             </Button>

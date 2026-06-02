@@ -301,10 +301,18 @@ function Contrato(doc, info, qr, nombre_contrato) {
   // ============================================
   // PAGOS (ESTILO TARJETA)
   // ============================================
-  let pagoStartY = starty - 47;
-  
+  const includeIva = Boolean(info.includeIva);
+  const pagoLineCount = includeIva ? 5 : 3;
+  const lineStep = includeIva ? 11 : 15;
+  const firstLineOffset = 21;
+  const lastLineOffset = firstLineOffset + lineStep * (pagoLineCount - 1);
+  const textBelowBaseline = includeIva ? 7 : 8;
+  const pagoBoxHeight = lastLineOffset + textBelowBaseline + 1;
+  const pagoBoxBottomY = starty + 18;
+  let pagoStartY = pagoBoxBottomY - pagoBoxHeight;
+
   doc.setFillColor(...colors.primary);
-  doc.roundedRect(290, pagoStartY, 275, 65, 8, 8, "F");
+  doc.roundedRect(290, pagoStartY, 275, pagoBoxHeight, 8, 8, "F");
 
   pagoStartY += 8;
   doc.setTextColor(...colors.white);
@@ -315,26 +323,48 @@ function Contrato(doc, info, qr, nombre_contrato) {
 
   pagoStartY += 13;
   
+  const formatPagoMonto = (valor) => {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return "$0";
+    return `$${n.toLocaleString("es-MX", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  };
+
   const drawPagoLine = (label, valor, y) => {
     doc.setFontSize(7);
     doc.setTextColor(199, 210, 254);
     doc.text(300, y, label);
-    
-    doc.setFontSize(11);
+
+    doc.setFontSize(includeIva ? 10 : 11);
     doc.setTextColor(...colors.white);
     doc.setFont("helvetica", "bold");
-    
-    doc.text(337, y, `$${valor}`);
-    
+
+    doc.text(337, y, formatPagoMonto(valor));
+
     doc.setFont("helvetica", "normal");
   };
 
-  const totalVal = info.total ?? info.total_pagos ?? 0;
-  const anticipoVal = info.anticipo ?? info.anticipo_pagos ?? Math.round(totalVal * 0.5);
-  const pendienteVal = info.pendiente ?? info.pendiente_pagos ?? (totalVal - anticipoVal);
-  drawPagoLine("TOTAL", totalVal, pagoStartY);
-  drawPagoLine("ANTICIPO", anticipoVal, pagoStartY + 15);
-  drawPagoLine("SALDO", pendienteVal, pagoStartY + 33);
+  const totalVal = info.subtotal ?? info.total ?? info.total_pagos ?? 0;
+  const anticipoVal = info.anticipo ?? info.anticipo_pagos ?? 0;
+  const pendienteVal = info.pendiente ?? info.pendiente_pagos ?? 0;
+  const ivaVal = info.iva ?? 0;
+  const saldoVal = info.saldo ?? info.pendiente ?? (totalVal - anticipoVal);
+
+  let lineY = pagoStartY;
+
+  drawPagoLine("TOTAL", totalVal, lineY);
+  lineY += lineStep;
+  drawPagoLine("ANTICIPO", anticipoVal, lineY);
+  lineY += lineStep;
+
+  if (includeIva) {
+    drawPagoLine("PENDIENTE", pendienteVal, lineY);
+    lineY += lineStep;
+    drawPagoLine("IVA (16%)", ivaVal, lineY);
+    lineY += lineStep;
+    drawPagoLine("SALDO", saldoVal, lineY);
+  } else {
+    drawPagoLine("SALDO", saldoVal, lineY);
+  }
 
   // ============================================
   // NOTA IMPORTANTE

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState, useEffect, useCallback } from 'react';
-import { AUTH_EMAIL, AUTH_PASSWORD, SESSION_KEY } from '../config/authCredentials';
+import { getAuthConfig, SESSION_KEY } from '../config/authCredentials';
 
 const AuthContext = createContext(null);
 
@@ -22,9 +22,12 @@ export function AuthProvider({ children }) {
   }, [isAuthenticated]);
 
   const login = useCallback((email, password) => {
+    const { emails, password: expectedPassword } = getAuthConfig();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedPassword = String(password || '').trim();
     const ok =
-      String(email || '').trim().toLowerCase() === AUTH_EMAIL.trim().toLowerCase() &&
-      String(password || '') === AUTH_PASSWORD;
+      emails.includes(normalizedEmail) &&
+      normalizedPassword === String(expectedPassword).trim();
     if (ok) setIsAuthenticated(true);
     return ok;
   }, []);

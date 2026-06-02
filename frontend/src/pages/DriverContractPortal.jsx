@@ -8,8 +8,9 @@ import {
 } from '../services/api';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Truck, Pencil } from 'lucide-react';
+import { Truck, Pencil, FileDown } from 'lucide-react';
 import { formatDateLocal } from '../utils/formatDateLocal';
+import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
 
 const PAYMENT_METHODS = [
   { value: 'Efectivo', label: 'Efectivo' },
@@ -59,6 +60,7 @@ const DriverContractPortal = () => {
   const [payDate, setPayDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [payNotes, setPayNotes] = useState('');
   const [savingPay, setSavingPay] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const load = async () => {
     try {
@@ -157,6 +159,25 @@ const DriverContractPortal = () => {
     }
   };
 
+  const handleDownloadContractPdf = async () => {
+    const row = portal?.contract;
+    if (!row?.contract_number) {
+      setToast({ message: 'No hay datos de contrato para el PDF', type: 'error' });
+      return;
+    }
+    try {
+      setPdfGenerating(true);
+      const info = await buildPdfInfoFromRow(row);
+      await generateContractPdf(info);
+      setToast({ message: 'Contrato descargado (PDF)', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ message: 'No se pudo generar el PDF. Intente de nuevo.', type: 'error' });
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
   if (loading) return <Loading />;
   if (notFound) {
     return (
@@ -173,16 +194,27 @@ const DriverContractPortal = () => {
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
       <header className="bg-blue-700 text-white px-4 py-6 shadow">
-        <div className="max-w-lg mx-auto flex items-start gap-3">
-          <Truck className="shrink-0 mt-1" size={28} />
-          <div>
-            <p className="text-blue-100 text-sm">Contrato</p>
-            <h1 className="text-2xl font-bold">{c?.contract_number}</h1>
-            <p className="text-blue-100 mt-1">{c?.client_name || 'Cliente'}</p>
-            <p className="text-sm mt-2 opacity-90">
-              {c?.origin || '—'} → {c?.destination || '—'}
-            </p>
+        <div className="max-w-lg mx-auto flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <Truck className="shrink-0 mt-1" size={28} />
+            <div className="min-w-0">
+              <p className="text-blue-100 text-sm">Contrato</p>
+              <h1 className="text-2xl font-bold break-words">{c?.contract_number}</h1>
+              <p className="text-blue-100 mt-1">{c?.client_name || 'Cliente'}</p>
+              <p className="text-sm mt-2 opacity-90">
+                {c?.origin || '—'} → {c?.destination || '—'}
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={handleDownloadContractPdf}
+            disabled={pdfGenerating || !c?.contract_number}
+            className="shrink-0 w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-white text-blue-800 hover:bg-blue-50 disabled:opacity-50 font-semibold px-4 py-3 min-h-[48px] shadow-sm"
+          >
+            <FileDown size={20} />
+            {pdfGenerating ? 'Generando…' : 'Descargar contrato (PDF)'}
+          </button>
         </div>
       </header>
 

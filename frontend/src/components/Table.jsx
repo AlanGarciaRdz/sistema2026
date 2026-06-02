@@ -98,9 +98,14 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                 const key = column.sortAccessor || column.accessor;
                 const canSort = sortable && key;
                 const isActive = sortKey === key;
+                const widthStyle = column.width
+                  ? { width: column.width, maxWidth: column.width }
+                  : column.maxWidth
+                    ? { maxWidth: column.maxWidth }
+                    : undefined;
                 return (
                   <th
-                    style={column.width ? { width: column.width } : column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
+                    style={widthStyle}
                     key={index}
                     onClick={() => canSort && handleSort(column)}
                     className={`sticky top-0 z-10 bg-gray-50 px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider shadow-[inset_0_-1px_0_0_rgb(229,231,235)] ${
@@ -131,7 +136,13 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
                     <td
                       key={colIndex}
                       className={`px-4 sm:px-6 py-3 sm:py-4 text-sm text-gray-900 ${column.wrap ? 'whitespace-normal' : 'whitespace-nowrap'}`}
-                      style={column.maxWidth ? { maxWidth: column.maxWidth } : undefined}
+                      style={
+                        column.width
+                          ? { width: column.width, maxWidth: column.width }
+                          : column.maxWidth
+                            ? { maxWidth: column.maxWidth }
+                            : undefined
+                      }
                     >
                       {column.render ? column.render(row) : row[column.accessor]}
                     </td>

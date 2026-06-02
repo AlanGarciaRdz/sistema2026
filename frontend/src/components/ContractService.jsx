@@ -4,7 +4,7 @@ import { getClients, getVehicles } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
-import { buildPdfInfoFromForm, generateContractPdf } from '../utils/contractPdfUtils';
+import { buildPdfInfoFromForm, calcIvaAmounts, generateContractPdf } from '../utils/contractPdfUtils';
 
 const UNIT_TYPES = [
     'Autobus',
@@ -60,8 +60,11 @@ const ContractService = ({
     const [itineraryText, setItineraryText] = useState('');
     const [unitType,     setUnitType]     = useState(UNIT_TYPES[2]);
     const [total,        setTotal]        = useState('');
+    const [includeIva,   setIncludeIva]   = useState(false);
+    /** Solo administración (no aparece en PDF cliente). Para $/km: monto cotizado ÷ km. */
+    const [adminKm,     setAdminKm]      = useState('');
     const [notes,        setNotes]        = useState('');
-    const [status,       setStatus]       = useState('scheduled');  // scheduled, in_progress, complete, pending_collect, pending_pay
+    const [status,       setStatus]       = useState('scheduled'); // + quote_sent, purchase_order, invoice_sent
 
     // ── contrato-only ──
     const [departure,     setDeparture]     = useState('');
@@ -111,6 +114,12 @@ const ContractService = ({
             setItineraryText(editingContract.itineraryText || '');
             setUnitType(editingContract.unitType || UNIT_TYPES[2]);
             setTotal(editingContract.total ?? '');
+            setIncludeIva(Boolean(editingContract.includeIva));
+            setAdminKm(
+              editingContract.adminKm != null && editingContract.adminKm !== ''
+                ? String(editingContract.adminKm)
+                : ''
+            );
             setNotes(editingContract.notes ?? '');
             setStatus(editingContract.status || 'scheduled');
             setDeparture(editingContract.departure || '');
@@ -179,6 +188,8 @@ const ContractService = ({
         setItineraryText('');
         setUnitType(UNIT_TYPES[2]);
         setTotal('');
+        setIncludeIva(false);
+        setAdminKm('');
         setNotes('');
         setStatus('scheduled');
         setDeparture('');
@@ -232,6 +243,8 @@ const ContractService = ({
         itineraryText,
         unitType,
         total: parseFloat(total) || 0,
+        includeIva,
+        adminKm: String(adminKm || '').trim() === '' ? null : Number(String(adminKm).replace(',', '.')),
         notes,
         status,
         };
@@ -264,6 +277,7 @@ const ContractService = ({
         unitType,
         capacity,
         total,
+        includeIva,
         departure,
         departureTime,
         returnDate,
@@ -598,6 +612,9 @@ const ContractService = ({
                 onChange={e => setStatus(e.target.value)}
                 className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
               >
+                <option value="quote_sent">Cotización enviada</option>
+                <option value="purchase_order">Orden de compra</option>
+                <option value="invoice_sent">Factura enviada</option>
                 <option value="scheduled">Programado</option>
                 <option value="in_progress">En curso</option>
                 <option value="complete">Completado</option>
@@ -657,6 +674,51 @@ const ContractService = ({
                   required
                   className="w-full text-sm border border-gray-200 rounded-lg pl-6 pr-3 py-2 font-medium text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
                 />
+              </div>
+              <label className="flex items-center gap-2 mt-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeIva}
+                  onChange={(e) => setIncludeIva(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-xs text-gray-700">Incluir IVA (16% del precio)</span>
+              </label>
+              {includeIva && (parseFloat(total) || 0) > 0 && (() => {
+                const { subtotal, iva, grandTotal } = calcIvaAmounts(total, true);
+                return (
+                  <p className="text-[11px] text-gray-600 leading-snug mt-0.5">
+                    Subtotal ${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })} + IVA $
+                    {iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })} ={' '}
+                    <span className="font-semibold text-gray-900">
+                      ${grandTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                    </span>{' '}
+                    en PDF y saldo a pagar
+                  </p>
+                );
+              })()}
+            </div>
+
+            <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <p className="text-xs font-semibold text-slate-800 mb-2">Interno · no aparece en PDF cliente</p>
+              <div className="flex flex-col gap-1 max-w-xs">
+                <label className="text-xs font-medium text-slate-600">
+                  Kilómetros del servicio (administrativo)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  placeholder="Ej. 400"
+                  value={adminKm}
+                  onChange={(e) => setAdminKm(e.target.value)}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-900 bg-white focus:outline-none focus:border-slate-700 focus:ring-2 focus:ring-slate-900/10"
+                />
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  Precio cotizado dividido entre km puede servir como referencia de lista. Otra vista útil es
+                  cobrado dividido entre km (realizado). En rutas repetitivas algunas empresas comparan también
+                  costo/km vs ingreso/km y el margen objetivo por servicio (no hay una sola fórmula oficial).
+                </p>
               </div>
             </div>
 

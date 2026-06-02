@@ -36,16 +36,96 @@ const getDashboardData = async (req, res) => {
     // Ingresos: mismo criterio que Payments.jsx (todos los tipos, incl. transferencias internas).
     // Rango: URL start/end, o metricStart/metricEnd (mes local del navegador), o mes en America/Mexico_City.
     const revenueQuery = metricsRange
-      ? `SELECT COALESCE(SUM(amount), 0) as total FROM payments
+      ? `SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM payments
          WHERE payment_date::date >= $1::date AND payment_date::date <= $2::date`
       : `WITH mx AS (
            SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
          )
-         SELECT COALESCE(SUM(p.amount), 0) AS total
+         SELECT COALESCE(SUM(p.amount), 0)::numeric AS total
          FROM payments p, mx
          WHERE p.payment_date::date >= date_trunc('month', mx.today_mx)::date
            AND p.payment_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
     const revenueResult = await pool.query(revenueQuery, metricsRange || []);
+    const revenueTotal = parseFloat(revenueResult.rows[0].total) || 0;
+
+    /** Viajes y valor contratado: mismos contratos (fecha de inicio en el rango). Ticket = suma montos ÷ viajes. */
+    const tripsQuery = metricsRange
+      ? `SELECT COUNT(*)::int AS total_trips,
+                COALESCE(SUM(total_amount), 0)::numeric AS contracts_value_total
+         FROM contracts
+         WHERE start_date IS NOT NULL
+           AND start_date::date >= $1::date AND start_date::date <= $2::date`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COUNT(*)::int AS total_trips,
+                COALESCE(SUM(co.total_amount), 0)::numeric AS contracts_value_total
+         FROM contracts co, mx
+         WHERE co.start_date IS NOT NULL
+           AND co.start_date::date >= date_trunc('month', mx.today_mx)::date
+           AND co.start_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
+    const tripsResult = await pool.query(tripsQuery, metricsRange || []);
+    const totalTrips = parseInt(tripsResult.rows[0].total_trips, 10) || 0;
+    const periodContractsValue = parseFloat(tripsResult.rows[0].contracts_value_total) || 0;
+    const estimatedAvgTicket = totalTrips > 0 ? periodContractsValue / totalTrips : 0;
+
+    /**
+     * Margen bruto: por viaje (contrato con inicio en el período) = total_amount − egresos ligados al contrato.
+     * Los egresos del viaje se suman aunque su fecha caiga fuera del período (atribuidos al contrato).
+     */
+    const grossMarginQuery = metricsRange
+      ? `SELECT COALESCE(SUM(co.total_amount), 0)::numeric AS contracts_value,
+                COALESCE(SUM(COALESCE(ce.contract_expenses, 0)), 0)::numeric AS contract_expenses,
+                COALESCE(SUM(co.total_amount - COALESCE(ce.contract_expenses, 0)), 0)::numeric AS gross_margin
+         FROM contracts co
+         LEFT JOIN (
+           SELECT contract_id, SUM(amount)::numeric AS contract_expenses
+           FROM expenses
+           WHERE contract_id IS NOT NULL
+             AND expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           GROUP BY contract_id
+         ) ce ON ce.contract_id = co.id
+         WHERE co.start_date IS NOT NULL
+           AND co.start_date::date >= $1::date AND co.start_date::date <= $2::date`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COALESCE(SUM(co.total_amount), 0)::numeric AS contracts_value,
+                COALESCE(SUM(COALESCE(ce.contract_expenses, 0)), 0)::numeric AS contract_expenses,
+                COALESCE(SUM(co.total_amount - COALESCE(ce.contract_expenses, 0)), 0)::numeric AS gross_margin
+         FROM contracts co
+         LEFT JOIN (
+           SELECT contract_id, SUM(amount)::numeric AS contract_expenses
+           FROM expenses
+           WHERE contract_id IS NOT NULL
+             AND expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           GROUP BY contract_id
+         ) ce ON ce.contract_id = co.id, mx
+         WHERE co.start_date IS NOT NULL
+           AND co.start_date::date >= date_trunc('month', mx.today_mx)::date
+           AND co.start_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
+    const grossMarginResult = await pool.query(grossMarginQuery, metricsRange || []);
+    const grossMargin = parseFloat(grossMarginResult.rows[0].gross_margin) || 0;
+    const periodContractExpenses = parseFloat(grossMarginResult.rows[0].contract_expenses) || 0;
+
+    /** Margen operativo (v1): egresos del período sin contrato asignado. */
+    const operatingMarginQuery = metricsRange
+      ? `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM expenses
+         WHERE contract_id IS NULL
+           AND expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           AND expense_date::date >= $1::date AND expense_date::date <= $2::date`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COALESCE(SUM(e.amount), 0)::numeric AS total
+         FROM expenses e, mx
+         WHERE e.contract_id IS NULL
+           AND e.expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           AND e.expense_date::date >= date_trunc('month', mx.today_mx)::date
+           AND e.expense_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
+    const operatingMarginResult = await pool.query(operatingMarginQuery, metricsRange || []);
+    const operatingMarginExpenses = parseFloat(operatingMarginResult.rows[0].total) || 0;
 
     // Egresos: misma base que Egresos.jsx.
     const expensesQuery = metricsRange
@@ -151,8 +231,14 @@ const getDashboardData = async (req, res) => {
       metrics: {
         totalClients: parseInt(clientsResult.rows[0].total),
         totalDueToCollect: parseFloat(porCobrarResult.rows[0].total),
-        currentMonthRevenue: parseFloat(revenueResult.rows[0].total),
+        currentMonthRevenue: revenueTotal,
         currentMonthExpenses: parseFloat(expensesResult.rows[0].total),
+        totalTrips,
+        periodContractsValue,
+        periodContractExpenses,
+        grossMargin,
+        operatingMarginExpenses,
+        estimatedAvgTicket,
         dateRange: userRange ? { start: userRange[0], end: userRange[1] } : null
       },
       accountsByBank,

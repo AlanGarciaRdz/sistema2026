@@ -14,8 +14,9 @@ const PAYMENT_METHODS = [
 
 const getContractByNumber = async (contractNumber) => {
   const r = await pool.query(
-    `SELECT co.id, co.contract_number, co.total_amount, co.origin, co.destination,
-            co.start_date, co.end_date, co.status, c.name as client_name
+    `SELECT co.*,
+            c.name AS client_name,
+            c.phone AS client_phone
      FROM contracts co
      LEFT JOIN clients c ON co.client_id = c.id
      WHERE co.contract_number = $1`,

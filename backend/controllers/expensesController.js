@@ -138,86 +138,92 @@ const createExpense = async (req, res) => {
   const splitsArr = Array.isArray(splits) ? splits : null;
 
   if (splitsArr && splitsArr.length >= 2) {
-    if (!Number.isFinite(amountNum) || amountNum <= 0) {
-      return res.status(400).json({ success: false, error: 'Monto inválido para reparto' });
-    }
-    for (const ln of splitsArr) {
-      const pid =
-        ln.payment_account_id != null ? parseInt(ln.payment_account_id, 10) : NaN;
-      const amt = ln.amount != null ? Number(ln.amount) : NaN;
-      if (Number.isNaN(pid) || pid < 1) {
-        return res.status(400).json({ success: false, error: 'Cuenta inválida en reparto' });
+    try {
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ success: false, error: 'Monto inválido para reparto' });
       }
-      if (!Number.isFinite(amt) || amt <= 0) {
+      for (const ln of splitsArr) {
+        const pid =
+          ln.payment_account_id != null ? parseInt(ln.payment_account_id, 10) : NaN;
+        const amt = ln.amount != null ? Number(ln.amount) : NaN;
+        if (Number.isNaN(pid) || pid < 1) {
+          return res.status(400).json({ success: false, error: 'Cuenta inválida en reparto' });
+        }
+        if (!Number.isFinite(amt) || amt <= 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'Cada línea debe tener monto mayor a cero'
+          });
+        }
+      }
+      if (!splitSumMatchesAmount(splitsArr, amountNum)) {
         return res.status(400).json({
           success: false,
-          error: 'Cada línea debe tener monto mayor a cero'
+          error: 'Los importes por cuenta deben sumar exactamente el monto total'
         });
       }
-    }
-    if (!splitSumMatchesAmount(splitsArr, amountNum)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Los importes por cuenta deben sumar exactamente el monto total'
-      });
-    }
 
-    let client;
-    try {
-      client = await pool.connect();
-      await client.query('BEGIN');
-      const groupId = crypto.randomUUID();
-      const createdRows = [];
-      const n = splitsArr.length;
-      let idx = 0;
-      for (const ln of splitsArr) {
-        idx += 1;
-        const pid = parseInt(ln.payment_account_id, 10);
-        const lineAmount = Number(ln.amount);
-        const buLookup = await client.query(
-          'SELECT business_unit FROM payment_accounts WHERE id = $1',
-          [pid]
-        );
-        const bu =
-          business_unit ||
-          buLookup.rows[0]?.business_unit ||
-          null;
-        const noteStr = buildExpenseNotesForSplit(notes, groupId, idx, n);
-        const ins = await client.query(
-          `INSERT INTO expenses (
-            contract_id, expense_type, amount, payment_account_id,
-            business_unit, expense_date, notes, validation_status, driver_payment_method
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'approved'), $9)
-          RETURNING *`,
-          [
-            contract_id || null,
-            expense_type,
-            lineAmount,
-            pid,
-            bu,
-            expense_date,
-            noteStr,
-            req.body.validation_status,
-            req.body.driver_payment_method || null
-          ]
-        );
-        createdRows.push(ins.rows[0]);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const groupId = crypto.randomUUID();
+        const createdRows = [];
+        const n = splitsArr.length;
+        let idx = 0;
+        for (const ln of splitsArr) {
+          idx += 1;
+          const pid = parseInt(ln.payment_account_id, 10);
+          const lineAmount = Number(ln.amount);
+          const buLookup = await client.query(
+            'SELECT business_unit FROM payment_accounts WHERE id = $1',
+            [pid]
+          );
+          const bu =
+            business_unit ||
+            buLookup.rows[0]?.business_unit ||
+            null;
+          const noteStr = buildExpenseNotesForSplit(notes, groupId, idx, n);
+          const ins = await client.query(
+            `INSERT INTO expenses (
+              contract_id, expense_type, amount, payment_account_id,
+              business_unit, expense_date, notes, validation_status, driver_payment_method
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'approved'), $9)
+            RETURNING *`,
+            [
+              contract_id || null,
+              expense_type,
+              lineAmount,
+              pid,
+              bu,
+              expense_date,
+              noteStr,
+              req.body.validation_status,
+              req.body.driver_payment_method || null
+            ]
+          );
+          createdRows.push(ins.rows[0]);
+        }
+        await client.query('COMMIT');
+        res.status(201).json({
+          success: true,
+          data: createdRows,
+          split_group_id: groupId
+        });
+      } catch (inner) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error creating split expenses:', inner);
+        res.status(500).json({ success: false, error: inner.message });
+      } finally {
+        client.release();
       }
-      await client.query('COMMIT');
-      res.status(201).json({
-        success: true,
-        data: createdRows,
-        split_group_id: groupId
-      });
-      return;
-    } catch (inner) {
-      if (client) await client.query('ROLLBACK').catch(() => {});
-      console.error('Error creating split expenses:', inner);
-      return res.status(500).json({ success: false, error: inner.message });
-    } finally {
-      if (client) client.release();
+    } catch (err) {
+      console.error('Error creating split expenses:', err);
+      res.status(500).json({ success: false, error: err.message });
     }
+    return;
   }
+
+  try {
     const result = await pool.query(
       `INSERT INTO expenses (
         contract_id, expense_type, amount, payment_account_id,

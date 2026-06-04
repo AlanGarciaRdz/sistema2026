@@ -3,7 +3,12 @@ import { getClients, getVehicles, getDrivers } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
-import { buildPdfInfoFromForm, calcIvaAmounts, generateContractPdf } from '../utils/contractPdfUtils';
+import {
+  buildPdfInfoFromForm,
+  calcIvaAmounts,
+  generateContractPdf,
+  splitSubtotalFromGrossTotal
+} from '../utils/contractPdfUtils';
 
 const UNIT_TYPES = [
     'Autobus',
@@ -64,7 +69,9 @@ const ContractService = ({
     const [itineraryText, setItineraryText] = useState('');
     const [unitType,     setUnitType]     = useState(UNIT_TYPES[2]);
     const [total,        setTotal]        = useState('');
-    const [includeIva,   setIncludeIva]   = useState(false);
+    const [includeIva, setIncludeIva] = useState(false);
+    /** Al marcar: el monto en el campo se trata como total con IVA y se convierte a subtotal (/1.16). */
+    const [ivaPriceIncludesTax, setIvaPriceIncludesTax] = useState(false);
     /** Solo administración (no aparece en PDF cliente). Para $/km: monto cotizado ÷ km. */
     const [adminKm,     setAdminKm]      = useState('');
     const [notes,        setNotes]        = useState('');
@@ -128,7 +135,9 @@ const ContractService = ({
             setItineraryText(editingContract.itineraryText || '');
             setUnitType(editingContract.unitType || UNIT_TYPES[2]);
             setTotal(editingContract.total ?? '');
-            setIncludeIva(Boolean(editingContract.includeIva));
+            const priceIncludesTax = Boolean(editingContract.ivaPriceIncludesTax);
+            setIvaPriceIncludesTax(priceIncludesTax);
+            setIncludeIva(priceIncludesTax ? false : Boolean(editingContract.includeIva));
             setAdminKm(
               editingContract.adminKm != null && editingContract.adminKm !== ''
                 ? String(editingContract.adminKm)
@@ -244,6 +253,41 @@ const ContractService = ({
         setServiceDate('');
         setServiceTime('');
         setFolio(generateContractNumber());
+        setIvaPriceIncludesTax(false);
+    };
+
+    const applyGrossTotalToSubtotal = () => {
+      const t = parseFloat(total);
+      if (!Number.isFinite(t) || t <= 0) return null;
+      const { subtotal, grandTotal } = splitSubtotalFromGrossTotal(t);
+      const subtotalStr =
+        Math.abs(subtotal - Math.round(subtotal)) < 0.001
+          ? String(Math.round(subtotal))
+          : subtotal.toFixed(2);
+      setTotal(subtotalStr);
+      return { subtotal, grandTotal };
+    };
+
+    /** PDF y guardado: cualquiera de los dos modos activa desglose de IVA. */
+    const ivaEnabledForPdf = includeIva || ivaPriceIncludesTax;
+
+    const handleIncludeIvaChange = (checked) => {
+      if (checked) {
+        setIvaPriceIncludesTax(false);
+        setIncludeIva(true);
+      } else {
+        setIncludeIva(false);
+      }
+    };
+
+    const handleIvaPriceIncludesTaxChange = (checked) => {
+      if (checked) {
+        setIncludeIva(false);
+        setIvaPriceIncludesTax(true);
+        applyGrossTotalToSubtotal();
+      } else {
+        setIvaPriceIncludesTax(false);
+      }
     };
 
     const handleClientSelect = (e) => {
@@ -287,7 +331,8 @@ const ContractService = ({
         itineraryText,
         unitType,
         total: parseFloat(total) || 0,
-        includeIva,
+        includeIva: includeIva || ivaPriceIncludesTax,
+        ivaPriceIncludesTax,
         adminKm: String(adminKm || '').trim() === '' ? null : Number(String(adminKm).replace(',', '.')),
         notes,
         status,
@@ -352,7 +397,7 @@ const ContractService = ({
         unitType,
         capacity,
         total,
-        includeIva,
+        includeIva: includeIva || ivaPriceIncludesTax,
         departure,
         departureTime,
         returnDate,
@@ -753,25 +798,47 @@ const ContractService = ({
                   className="w-full text-sm border border-gray-200 rounded-lg pl-6 pr-3 py-2 font-medium text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
                 />
               </div>
-              <label className="flex items-center gap-2 mt-1 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={includeIva}
-                  onChange={(e) => setIncludeIva(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <span className="text-xs text-gray-700">Incluir IVA (16% del precio)</span>
-              </label>
-              {includeIva && (parseFloat(total) || 0) > 0 && (() => {
+              <div className="mt-2 flex flex-col gap-1.5">
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeIva && !ivaPriceIncludesTax}
+                    onChange={(e) => handleIncludeIvaChange(e.target.checked)}
+                    className="rounded border-gray-300 mt-0.5"
+                  />
+                  <span className="text-xs text-gray-700 leading-snug">
+                    Sumar IVA (16%) al precio — el monto arriba es subtotal y en PDF se agrega el IVA
+                  </span>
+                </label>
+                <label
+                  className={`flex items-start gap-2 cursor-pointer select-none rounded-md border px-2 py-1.5 ${
+                    ivaPriceIncludesTax
+                      ? 'border-violet-300 bg-violet-50/90'
+                      : 'border-gray-200 bg-gray-50/50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ivaPriceIncludesTax}
+                    onChange={(e) => handleIvaPriceIncludesTaxChange(e.target.checked)}
+                    className="rounded border-gray-300 mt-0.5"
+                  />
+                  <span className="text-xs text-gray-800 leading-snug">
+                    <span className="font-medium text-violet-900">Precio ya incluye IVA</span>
+                    {' — '}
+                    escribe el total cobrado (ej. 6,000); al marcar convierte a subtotal ÷1.16 (solo una
+                    opción a la vez)
+                  </span>
+                </label>
+              </div>
+              {ivaEnabledForPdf && (parseFloat(total) || 0) > 0 && (() => {
                 const { subtotal, iva, grandTotal } = calcIvaAmounts(total, true);
+                const fmt = (n) =>
+                  n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 return (
-                  <p className="text-[11px] text-gray-600 leading-snug mt-0.5">
-                    Subtotal ${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })} + IVA $
-                    {iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })} ={' '}
-                    <span className="font-semibold text-gray-900">
-                      ${grandTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                    </span>{' '}
-                    en PDF y saldo a pagar
+                  <p className="text-[11px] text-gray-600 leading-snug mt-1">
+                    En PDF: Subtotal ${fmt(subtotal)} + IVA (16%) ${fmt(iva)} ={' '}
+                    <span className="font-semibold text-gray-900">${fmt(grandTotal)}</span> saldo a pagar
                   </p>
                 );
               })()}

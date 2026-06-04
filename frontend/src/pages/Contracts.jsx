@@ -242,6 +242,8 @@ const Contracts = () => {
       else delete nextNotesObj.adminKm;
       if (payload.includeIva) nextNotesObj.includeIva = true;
       else delete nextNotesObj.includeIva;
+      if (payload.ivaPriceIncludesTax) nextNotesObj.ivaPriceIncludesTax = true;
+      else delete nextNotesObj.ivaPriceIncludesTax;
 
       const contractData = {
         contract_number: payload.folio,
@@ -347,6 +349,7 @@ const Contracts = () => {
       unitType: notesData.unitType || '',
       total: row.total_amount ?? '',
       includeIva: Boolean(notesData.includeIva),
+      ivaPriceIncludesTax: Boolean(notesData.ivaPriceIncludesTax),
       adminKm:
         notesData.adminKm != null && notesData.adminKm !== ''
           ? String(notesData.adminKm)
@@ -403,6 +406,7 @@ const Contracts = () => {
       unitType: notesData.unitType || '',
       total: row.total_amount ?? '',
       includeIva: Boolean(notesData.includeIva),
+      ivaPriceIncludesTax: Boolean(notesData.ivaPriceIncludesTax),
       adminKm:
         notesData.adminKm != null && notesData.adminKm !== ''
           ? String(notesData.adminKm)

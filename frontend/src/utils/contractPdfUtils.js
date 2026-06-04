@@ -50,6 +50,17 @@ export function calcIvaAmounts(subtotal, includeIva) {
   return { includeIva: true, subtotal: base, iva, grandTotal };
 }
 
+/** Total capturado ya incluye IVA → subtotal = total / 1.16 */
+export function splitSubtotalFromGrossTotal(grossTotal) {
+  const gross = Math.round((parseFloat(grossTotal) || 0) * 100) / 100;
+  if (gross <= 0) {
+    return { subtotal: 0, iva: 0, grandTotal: 0 };
+  }
+  const subtotal = Math.round((gross / (1 + IVA_RATE)) * 100) / 100;
+  const iva = Math.round((gross - subtotal) * 100) / 100;
+  return { subtotal, iva, grandTotal: gross };
+}
+
 function calcAnticipoPendienteFromPayments(payments, amountDue) {
   const due = Math.round((parseFloat(amountDue) || 0) * 100) / 100;
   const forContract = payments || [];

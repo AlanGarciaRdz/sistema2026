@@ -304,25 +304,29 @@ function Contrato(doc, info, qr, nombre_contrato) {
   const includeIva = Boolean(info.includeIva);
   const pagoLineCount = includeIva ? 5 : 3;
   const lineStep = includeIva ? 11 : 15;
-  const firstLineOffset = 21;
+  const pagoBoxLeft = 290;
+  const pagoBoxWidth = 275;
+  const pagoValueRightX = pagoBoxLeft + pagoBoxWidth - 14;
+
+  const firstLineOffset = 25;
   const lastLineOffset = firstLineOffset + lineStep * (pagoLineCount - 1);
-  const textBelowBaseline = includeIva ? 7 : 8;
+  const textBelowBaseline = includeIva ? 8 : 9;
   const pagoBoxHeight = lastLineOffset + textBelowBaseline + 1;
   const pagoBoxBottomY = starty + 18;
   let pagoStartY = pagoBoxBottomY - pagoBoxHeight;
 
   doc.setFillColor(...colors.primary);
-  doc.roundedRect(290, pagoStartY, 275, pagoBoxHeight, 8, 8, "F");
+  doc.roundedRect(pagoBoxLeft, pagoStartY, pagoBoxWidth, pagoBoxHeight, 8, 8, "F");
 
-  pagoStartY += 8;
+  pagoStartY += 11;
   doc.setTextColor(...colors.white);
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.text(300, pagoStartY, "PAGOS / PAYMENT");
   doc.setFont("helvetica", "normal");
 
-  pagoStartY += 13;
-  
+  pagoStartY += 15;
+
   const formatPagoMonto = (valor) => {
     const n = Number(valor);
     if (!Number.isFinite(n)) return "$0";
@@ -338,7 +342,7 @@ function Contrato(doc, info, qr, nombre_contrato) {
     doc.setTextColor(...colors.white);
     doc.setFont("helvetica", "bold");
 
-    doc.text(337, y, formatPagoMonto(valor));
+    doc.text(pagoValueRightX, y, formatPagoMonto(valor), { align: "right" });
 
     doc.setFont("helvetica", "normal");
   };

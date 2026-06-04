@@ -6,6 +6,7 @@ import Header from '../components/Header';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import AccountsBusinessUnitStackedBar from '../components/AccountsBusinessUnitStackedBar';
+import ExpensesByTypePieChart from '../components/ExpensesByTypePieChart';
 import { Users, DollarSign, Receipt, CreditCard, Landmark, Wallet, Bus, BadgePercent, TrendingUp, Building2 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -62,6 +63,7 @@ const Dashboard = () => {
   const upcomingAssignments = data?.upcomingAssignments || [];
   const accountsByBusinessUnit = data?.accountsByBusinessUnit || [];
   const accountsByBank = data?.accountsByBank || [];
+  const expensesByType = data?.expensesByType || [];
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('es-MX', {
@@ -93,6 +95,9 @@ const Dashboard = () => {
     : 'Ticket promedio por valor de contrato (mes hasta hoy)';
   const grossMarginLabel = hasDateRange ? 'Margen bruto (periodo)' : 'Margen bruto (mes hasta hoy)';
   const operatingMarginLabel = hasDateRange ? 'Margen operativo (periodo)' : 'Margen operativo (mes hasta hoy)';
+  const expensesChartPeriodLabel = hasDateRange
+    ? `Período: ${dateStart} a ${dateEnd}`
+    : 'Mes calendario hasta hoy (misma base que la tarjeta de egresos)';
 
   return (
     <div className="p-6">
@@ -282,6 +287,12 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      <ExpensesByTypePieChart
+        expensesByType={expensesByType}
+        formatCurrency={formatCurrency}
+        periodLabel={expensesChartPeriodLabel}
+      />
 
       {/* Saldo agrupado por banco / institución */}
       {accountsByBank.length > 0 && (

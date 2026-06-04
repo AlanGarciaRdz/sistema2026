@@ -92,6 +92,13 @@ export const createMaintenance = (data) => api.post('/maintenance', data);
 export const updateMaintenance = (id, data) => api.put(`/maintenance/${id}`, data);
 export const deleteMaintenance = (id) => api.delete(`/maintenance/${id}`);
 export const syncMaintenanceExpenses = () => api.post('/maintenance/sync-expenses');
+export const getMaintenanceFleet = () => api.get('/maintenance/fleet');
+export const updateVehicleMileage = (vehicleId, data) =>
+  api.patch(`/maintenance/vehicles/${vehicleId}/mileage`, data);
+export const createServiceItem = (data) => api.post('/maintenance/service-items', data);
+export const updateServiceItem = (id, data) => api.put(`/maintenance/service-items/${id}`, data);
+export const deleteServiceItem = (id) => api.delete(`/maintenance/service-items/${id}`);
+export const ensureVehicleAdblue = (vehicleId) => api.post(`/maintenance/vehicles/${vehicleId}/adblue`);
 
 // Assignments
 export const getAssignments = () => api.get('/assignments');

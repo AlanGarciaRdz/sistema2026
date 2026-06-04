@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { getClients, getVehicles } from '../services/api';
+import { getClients, getVehicles, getDrivers } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
@@ -30,7 +29,7 @@ const ContractService = ({
   onClose,
   onSave,
   editingContract,
-  assignedDriverNames = []
+  initialAssignment = null
 }) => {
 
     // ── mode & folio ──
@@ -44,6 +43,11 @@ const ContractService = ({
     // Vehicle data
     const [vehicles, setVehicles] = useState([]);
     const [selectedVehicle, setSelectedVehicle] = useState(null);
+
+    const [drivers, setDrivers] = useState([]);
+    const [selectedDriverId, setSelectedDriverId] = useState('');
+    const [drivingDate, setDrivingDate] = useState('');
+    const [assignedDate, setAssignedDate] = useState(() => new Date().toISOString().slice(0, 10));
 
     const [loading, setLoading] = useState(false);
     const [toast, setToast] = useState(null);
@@ -85,9 +89,10 @@ const ContractService = ({
             document.body.style.overflow = 'hidden';
             fetchClients();
             fetchVehicles();
-            // loadDrivers(); // Add this when you have the API endpoint
+            fetchDrivers();
         } else {
             document.body.style.overflow = 'unset';
+            loadedAssignmentRef.current = null;
         }
 
         return () => {
@@ -96,6 +101,15 @@ const ContractService = ({
     }, [isOpen]);
 
     const loadedEditIdRef = useRef(null);
+    const loadedAssignmentRef = useRef(null);
+
+    const tripDateDefault = mode === 'contrato' ? departure : serviceDate;
+
+    useEffect(() => {
+      if (!isOpen || !tripDateDefault) return;
+      if (initialAssignment?.driving_date && loadedAssignmentRef.current === initialAssignment.id) return;
+      setDrivingDate(tripDateDefault);
+    }, [isOpen, tripDateDefault, mode, departure, serviceDate, initialAssignment?.id, initialAssignment?.driving_date]);
     useEffect(() => {
         if (editingContract && isOpen) {
           const loadKey = editingContract.id ?? editingContract.folio ?? 'copy';
@@ -140,6 +154,30 @@ const ContractService = ({
         }
       }, [editingContract, isOpen]);
 
+    useEffect(() => {
+      if (!isOpen || !initialAssignment?.id) return;
+      if (loadedAssignmentRef.current === initialAssignment.id) return;
+      loadedAssignmentRef.current = initialAssignment.id;
+      setSelectedDriverId(
+        initialAssignment.driver_id != null ? String(initialAssignment.driver_id) : ''
+      );
+      setDrivingDate(
+        initialAssignment.driving_date
+          ? String(initialAssignment.driving_date).slice(0, 10)
+          : ''
+      );
+      setAssignedDate(
+        initialAssignment.assigned_date
+          ? String(initialAssignment.assigned_date).slice(0, 10)
+          : new Date().toISOString().slice(0, 10)
+      );
+      if (initialAssignment.vehicle_id && vehicles.length) {
+        const v =
+          vehicles.find((ve) => String(ve.id) === String(initialAssignment.vehicle_id)) || null;
+        if (v) setSelectedVehicle(v);
+      }
+    }, [isOpen, initialAssignment, vehicles]);
+
     const fetchClients = async () => {
         try {
             setLoading(true);
@@ -165,19 +203,25 @@ const ContractService = ({
         }
       };
 
-    // Uncomment when you add the drivers API
-    // const loadDrivers = async () => {
-    //     try {
-    //         const data = await getDrivers();
-    //         setDrivers(data);
-    //     } catch (error) {
-    //         console.error('Error loading drivers:', error);
-    //     }
-    // };
+    const fetchDrivers = async () => {
+      try {
+        const response = await getDrivers();
+        const list = (response.data.data || []).slice().sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''), 'es')
+        );
+        setDrivers(list);
+      } catch (error) {
+        console.error('Error loading drivers:', error);
+      }
+    };
 
     const resetForm = () => {
         setSelectedClient(null);
         setSelectedVehicle(null);
+        setSelectedDriverId('');
+        setDrivingDate('');
+        setAssignedDate(new Date().toISOString().slice(0, 10));
+        loadedAssignmentRef.current = null;
         setContactName('');
         setContactPhone('');
         setOrigin('');
@@ -221,7 +265,7 @@ const ContractService = ({
         
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         const folioTrim = String(folio || '').trim();
         if (!folioTrim) {
@@ -248,13 +292,44 @@ const ContractService = ({
         notes,
         status,
         };
-        const payload = mode === 'contrato'
-        ? { ...base, departure, departureTime, returnDate, returnTime, capacity: parseInt(capacity) || null }
-        : { ...base, serviceDate, serviceTime };
+        const tripDate = mode === 'contrato' ? departure : serviceDate;
+        if (selectedDriverId && !drivingDate && !tripDate) {
+          setToast({
+            message: 'Indica la fecha del viaje o la fecha de manejo para asignar chofer',
+            type: 'error'
+          });
+          return;
+        }
 
-        onSave(payload);
-        resetForm();
-        onClose();
+        const assignment = selectedDriverId
+          ? {
+              id: initialAssignment?.id || null,
+              driver_id: parseInt(selectedDriverId, 10),
+              vehicle_id: selectedVehicle?.id || null,
+              driving_date: drivingDate || tripDate,
+              assigned_date: assignedDate || new Date().toISOString().slice(0, 10)
+            }
+          : null;
+
+        const payload = mode === 'contrato'
+        ? {
+            ...base,
+            departure,
+            departureTime,
+            returnDate,
+            returnTime,
+            capacity: parseInt(capacity) || null,
+            assignment
+          }
+        : { ...base, serviceDate, serviceTime, assignment };
+
+        try {
+          await onSave(payload);
+          resetForm();
+          onClose();
+        } catch {
+          /* El padre muestra toast de error */
+        }
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -623,33 +698,36 @@ const ContractService = ({
               </select>
             </div>
 
-            {editingContract && assignedDriverNames.length > 0 && (
-              <div className="col-span-2 flex flex-col gap-1.5 rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2.5">
-                <span className="text-xs font-medium text-violet-900">
-                  Choferes asignados (desde Asignaciones)
-                </span>
-                <ul className="text-sm text-violet-950 list-disc list-inside space-y-0.5">
-                  {assignedDriverNames.map((name) => (
-                    <li key={name}>{name}</li>
-                  ))}
-                </ul>
-                <Link
-                  to="/assignments"
-                  className="text-xs font-medium text-violet-700 hover:text-violet-900 underline underline-offset-2"
-                >
-                  Gestionar en Asignaciones →
-                </Link>
-              </div>
-            )}
-            {editingContract && assignedDriverNames.length === 0 && (
-              <div className="col-span-2 text-xs text-gray-500">
-                Chofer / unidad operativa: créalo en{' '}
-                <Link to="/assignments" className="text-violet-700 font-medium hover:underline">
-                  Asignaciones
-                </Link>
-                .
-              </div>
-            )}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Chofer</label>
+              <select
+                value={selectedDriverId}
+                onChange={(e) => setSelectedDriverId(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+              >
+                <option value="">— Sin asignar —</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">
+                Fecha de manejo {selectedDriverId ? <span className="text-red-500">*</span> : null}
+              </label>
+              <input
+                type="date"
+                value={drivingDate}
+                onChange={(e) => setDrivingDate(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+              <p className="text-[11px] text-gray-400">
+                Por defecto usa la fecha de salida / servicio del viaje.
+              </p>
+            </div>
 
           </div>
 

@@ -17,6 +17,13 @@ import FormSelect from '../components/FormSelect';
 import FormInput from '../components/FormInput';
 import Button from '../components/Button';
 import { formatDateLocal } from '../utils/formatDateLocal';
+import {
+  driverIdFromAssignmentOrNotes,
+  duplicateAssignmentIds,
+  getNotesAssignmentBlock,
+  parseContractNotes,
+  resolveAssignmentIdForContract
+} from '../utils/assignmentContractSync';
 
 const Assignments = () => {
   const [assignments, setAssignments] = useState([]);
@@ -67,14 +74,7 @@ const Assignments = () => {
     }
   };
 
-  const parseJson = (value) => {
-    if (!value || typeof value !== 'string') return null;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  };
+  const parseJson = (value) => parseContractNotes(value);
 
   const fetchModalData = async () => {
     try {
@@ -154,7 +154,9 @@ const Assignments = () => {
 
     let unitType = '';
     let vehicleId = '';
+    let driverId = '';
     const notesJson = parseJson(contract?.notes);
+    const notesAssignment = getNotesAssignmentBlock(contract?.notes);
 
     if (notesJson?.unitType) {
       unitType = notesJson.unitType;
@@ -162,9 +164,15 @@ const Assignments = () => {
       unitType = notesJson.vehicle.vehicle_type;
     }
 
+    if (notesAssignment?.driver_id) {
+      driverId = String(notesAssignment.driver_id);
+    }
+
     // If contract already has vehicle assigned, preselect vehicle.
     if (notesJson?.vehicle?.id) {
       vehicleId = String(notesJson.vehicle.id);
+    } else if (notesAssignment?.vehicle_id) {
+      vehicleId = String(notesAssignment.vehicle_id);
     } else if (contract?.vehicle_name) {
       const matchedVehicle = vehicles.find((v) => {
         const plate = (v.license_plate || '').toLowerCase();
@@ -182,8 +190,13 @@ const Assignments = () => {
     setFormData((prev) => ({
       ...prev,
       contract_id: contractId,
+      driver_id: driverId || prev.driver_id,
       vehicle_id: vehicleId,
-      driving_date: contract?.start_date ? String(contract.start_date).slice(0, 10) : ''
+      driving_date:
+        (contract?.start_date ? String(contract.start_date).slice(0, 10) : '') ||
+        (notesAssignment?.driving_date
+          ? String(notesAssignment.driving_date).slice(0, 10)
+          : '')
     }));
   };
 
@@ -197,10 +210,18 @@ const Assignments = () => {
     const unitType = notesJson?.unitType || notesJson?.vehicle?.vehicle_type || '';
     setContractUnitType(unitType);
 
+    const driverId = driverIdFromAssignmentOrNotes(assignment, contract?.notes);
+
     setFormData({
       contract_id: assignment.contract_id ? String(assignment.contract_id) : '',
-      driver_id: assignment.driver_id ? String(assignment.driver_id) : '',
-      vehicle_id: assignment.vehicle_id ? String(assignment.vehicle_id) : '',
+      driver_id: driverId,
+      vehicle_id: assignment.vehicle_id
+        ? String(assignment.vehicle_id)
+        : notesJson?.vehicle?.id
+          ? String(notesJson.vehicle.id)
+          : getNotesAssignmentBlock(contract?.notes)?.vehicle_id
+            ? String(getNotesAssignmentBlock(contract?.notes).vehicle_id)
+            : '',
       assigned_date: assignment.assigned_date ? String(assignment.assigned_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
       driving_date: assignment.driving_date ? String(assignment.driving_date).slice(0, 10) : '',
       notes: assignment.notes || ''
@@ -230,12 +251,28 @@ const Assignments = () => {
         notes: formData.notes || null
       };
 
-      if (editingAssignment?.id) {
-        await updateAssignment(editingAssignment.id, payload);
+      const contractId = payload.contract_id;
+      const existingId = resolveAssignmentIdForContract(
+        contractId,
+        editingAssignment?.id,
+        assignments
+      );
+      let keptId = existingId;
+
+      if (keptId) {
+        await updateAssignment(keptId, payload);
         setToast({ message: 'Asignación actualizada exitosamente', type: 'success' });
       } else {
-        await createAssignment(payload);
+        const created = await createAssignment(payload);
+        keptId = created.data?.data?.id ?? null;
         setToast({ message: 'Asignación creada exitosamente', type: 'success' });
+      }
+
+      if (contractId && keptId) {
+        const dupIds = duplicateAssignmentIds(contractId, keptId, assignments);
+        for (const dupId of dupIds) {
+          await deleteAssignment(dupId);
+        }
       }
 
       setIsModalOpen(false);

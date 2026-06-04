@@ -140,6 +140,35 @@ const getDashboardData = async (req, res) => {
            AND e.expense_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date`;
     const expensesResult = await pool.query(expensesQuery, metricsRange || []);
 
+    /** Egresos por tipo de gasto (mismo período que ingresos/egresos; sin transferencias internas). */
+    const expensesByTypeQuery = metricsRange
+      ? `SELECT COALESCE(NULLIF(TRIM(expense_type), ''), 'Sin tipo') AS expense_type,
+                COALESCE(SUM(amount), 0)::numeric AS total,
+                COUNT(*)::int AS expense_count
+         FROM expenses
+         WHERE expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           AND expense_date::date >= $1::date AND expense_date::date <= $2::date
+         GROUP BY 1
+         ORDER BY total DESC`
+      : `WITH mx AS (
+           SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date AS today_mx
+         )
+         SELECT COALESCE(NULLIF(TRIM(e.expense_type), ''), 'Sin tipo') AS expense_type,
+                COALESCE(SUM(e.amount), 0)::numeric AS total,
+                COUNT(*)::int AS expense_count
+         FROM expenses e, mx
+         WHERE e.expense_type IS DISTINCT FROM 'Transferencia entre cuentas'
+           AND e.expense_date::date >= date_trunc('month', mx.today_mx)::date
+           AND e.expense_date::date < (date_trunc('month', mx.today_mx) + interval '1 month')::date
+         GROUP BY 1
+         ORDER BY total DESC`;
+    const expensesByTypeResult = await pool.query(expensesByTypeQuery, metricsRange || []);
+    const expensesByType = expensesByTypeResult.rows.map((row) => ({
+      expenseType: row.expense_type,
+      total: parseFloat(row.total) || 0,
+      count: parseInt(row.expense_count, 10) || 0
+    }));
+
     // Cuentas: solo si el usuario eligió fechas en la URL (no aplica a metricStart/metricEnd).
     const accountsQuery = hasUserAccountsRange
       ? `SELECT pa.id, pa.account_name, pa.bank_name,
@@ -243,6 +272,7 @@ const getDashboardData = async (req, res) => {
       },
       accountsByBank,
       accountsByBusinessUnit,
+      expensesByType,
       recentContracts: recentContractsResult.rows,
       upcomingAssignments: upcomingAssignmentsResult.rows
     };

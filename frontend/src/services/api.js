@@ -77,12 +77,18 @@ export const getDriverPortal = (contractNumber) =>
   api.get(`/driver-portal/${encodeURIComponent(contractNumber)}`);
 export const postDriverPortalExpense = (contractNumber, data) =>
   api.post(`/driver-portal/${encodeURIComponent(contractNumber)}/expenses`, data);
+export const postDriverPortalExpensesBulk = (contractNumber, data) =>
+  api.post(`/driver-portal/${encodeURIComponent(contractNumber)}/expenses/bulk`, data);
 export const postDriverPortalPayment = (contractNumber, data) =>
   api.post(`/driver-portal/${encodeURIComponent(contractNumber)}/payments`, data);
 export const putDriverPortalExpense = (contractNumber, expenseId, data) =>
   api.put(
     `/driver-portal/${encodeURIComponent(contractNumber)}/expenses/${expenseId}`,
     data
+  );
+export const deleteDriverPortalExpense = (contractNumber, expenseId) =>
+  api.delete(
+    `/driver-portal/${encodeURIComponent(contractNumber)}/expenses/${expenseId}`
   );
 
 // Maintenance

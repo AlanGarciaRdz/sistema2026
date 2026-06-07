@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { getPaymentsByContractNumber } from '../services/api';
 import { formatDateLocal } from '../utils/formatDateLocal';
+import { getContractBillingAmounts } from '../utils/contractPdfUtils';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount || 0);
@@ -47,7 +48,8 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
     notesData.vehicle?.vehicle_code ||
     notesData.vehicle?.plate ||
     '-';
-  const total = parseFloat(row?.total_amount) || 0;
+  const billing = row ? getContractBillingAmounts(row) : { grandTotal: 0, includeIva: false, subtotal: 0, iva: 0 };
+  const total = billing.grandTotal;
   const originMaps = row?.origin_maps || '';
   const destinationMaps = row?.destination_maps || '';
   const itinerary = row?.itinerary || '';
@@ -187,8 +189,13 @@ const TripSummaryModal = ({ isOpen, onClose, row }) => {
             <p className="font-medium">{assignedUnit}</p>
           </div>
           <div>
-            <span className="text-gray-500">Total</span>
+            <span className="text-gray-500">Total{billing.includeIva ? ' (con IVA)' : ''}</span>
             <p className="font-medium">{formatCurrency(total)}</p>
+            {billing.includeIva && (
+              <p className="text-xs text-gray-500">
+                Subtotal {formatCurrency(billing.subtotal)} + IVA {formatCurrency(billing.iva)}
+              </p>
+            )}
           </div>
           <div>
             <span className="text-gray-500">Apartado</span>

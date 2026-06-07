@@ -50,6 +50,24 @@ export function calcIvaAmounts(subtotal, includeIva) {
   return { includeIva: true, subtotal: base, iva, grandTotal };
 }
 
+/** Montos de cobro para listados (Contratos, resúmenes) según notes.includeIva. */
+export function getContractBillingAmounts(row) {
+  let notesData = {};
+  try {
+    notesData = row?.notes ? JSON.parse(row.notes) : {};
+  } catch {
+    notesData = {};
+  }
+  const includeIva = Boolean(notesData.includeIva);
+  const subtotal = parseFloat(row?.total_amount) || 0;
+  return calcIvaAmounts(subtotal, includeIva);
+}
+
+/** Total a cobrar al cliente (con IVA si aplica). */
+export function getContractAmountDue(row) {
+  return getContractBillingAmounts(row).grandTotal;
+}
+
 /** Total capturado ya incluye IVA → subtotal = total / 1.16 */
 export function splitSubtotalFromGrossTotal(grossTotal) {
   const gross = Math.round((parseFloat(grossTotal) || 0) * 100) / 100;

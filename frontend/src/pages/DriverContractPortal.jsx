@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getDriverPortal,
   postDriverPortalExpense,
+  postDriverPortalExpensesBulk,
   putDriverPortalExpense,
+  deleteDriverPortalExpense,
   postDriverPortalPayment
 } from '../services/api';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
-import { Truck, Pencil, FileDown } from 'lucide-react';
+import { Truck, User, Pencil, Trash2, FileDown, Upload } from 'lucide-react';
+import { parseCasetasCsv } from '../utils/parseCasetasCsv';
 import { formatDateLocal } from '../utils/formatDateLocal';
 import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
 
@@ -62,6 +65,12 @@ const DriverContractPortal = () => {
   const [savingPay, setSavingPay] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
+  const [casetasPreview, setCasetasPreview] = useState([]);
+  const [casetasImportMethod, setCasetasImportMethod] = useState('Transferencia');
+  const [casetasParseErrors, setCasetasParseErrors] = useState([]);
+  const [importingCasetas, setImportingCasetas] = useState(false);
+  const [deletingExpenseId, setDeletingExpenseId] = useState(null);
+
   const load = async () => {
     try {
       setLoading(true);
@@ -86,6 +95,31 @@ const DriverContractPortal = () => {
 
   const formatDate = formatDateLocal;
 
+  const getCasetaRowKey = (row, index) =>
+    row.tag_folio ? String(row.tag_folio) : `${index}-${row.expense_date}-${row.notes}`;
+
+  const selectedCasetas = useMemo(
+    () => casetasPreview.filter((row) => row.selected !== false),
+    [casetasPreview]
+  );
+
+  const selectedCasetasTotal = useMemo(
+    () => selectedCasetas.reduce((s, row) => s + row.amount, 0),
+    [selectedCasetas]
+  );
+
+  const toggleCasetaRow = (key) => {
+    setCasetasPreview((prev) =>
+      prev.map((row, i) =>
+        getCasetaRowKey(row, i) === key ? { ...row, selected: row.selected === false } : row
+      )
+    );
+  };
+
+  const setAllCasetasSelected = (selected) => {
+    setCasetasPreview((prev) => prev.map((row) => ({ ...row, selected })));
+  };
+
   const resetExpenseForm = () => {
     setEditingExpense(null);
     setExpenseType('Viatico');
@@ -104,6 +138,24 @@ const DriverContractPortal = () => {
     setExpenseDate(ex.expense_date ? String(ex.expense_date).slice(0, 10) : new Date().toISOString().split('T')[0]);
     setExpenseNotes(parseNotes(ex.notes));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const onDeleteExpense = async (ex) => {
+    if (ex.validation_status !== 'pending') return;
+    const noteText = parseNotes(ex.notes);
+    const label = [ex.expense_type, noteText].filter(Boolean).join(' · ');
+    if (!window.confirm(`¿Eliminar este gasto?\n${label}\n${formatCurrency(ex.amount)}`)) return;
+    try {
+      setDeletingExpenseId(ex.id);
+      await deleteDriverPortalExpense(contractNumber, ex.id);
+      if (editingExpense?.id === ex.id) resetExpenseForm();
+      setToast({ message: 'Gasto eliminado', type: 'success' });
+      await load();
+    } catch (err) {
+      setToast({ message: err.response?.data?.error || 'No se pudo eliminar', type: 'error' });
+    } finally {
+      setDeletingExpenseId(null);
+    }
   };
 
   const onSubmitExpense = async (e) => {
@@ -159,6 +211,53 @@ const DriverContractPortal = () => {
     }
   };
 
+  const onCasetasCsvSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { rows, errors } = parseCasetasCsv(text);
+      setCasetasPreview(rows.map((row) => ({ ...row, selected: true })));
+      setCasetasParseErrors(errors);
+      if (!rows.length) {
+        setToast({
+          message: errors[0] || 'No se encontraron peajes en el CSV',
+          type: 'error'
+        });
+      }
+    } catch {
+      setToast({ message: 'No se pudo leer el archivo', type: 'error' });
+    }
+  };
+
+  const onImportCasetasCsv = async () => {
+    if (!selectedCasetas.length) {
+      setToast({ message: 'Selecciona al menos un peaje', type: 'error' });
+      return;
+    }
+    try {
+      setImportingCasetas(true);
+      const items = selectedCasetas.map(({ selected: _s, ...row }) => row);
+      const res = await postDriverPortalExpensesBulk(contractNumber, {
+        payment_method: casetasImportMethod,
+        items
+      });
+      const { created = 0, skipped = 0 } = res.data || {};
+      setToast({
+        message: `Importados ${created} caseta(s)${skipped ? ` · ${skipped} omitido(s) (duplicados)` : ''}`,
+        type: 'success'
+      });
+      setCasetasPreview([]);
+      setCasetasParseErrors([]);
+      await load();
+    } catch (err) {
+      setToast({ message: err.response?.data?.error || 'Error al importar', type: 'error' });
+    } finally {
+      setImportingCasetas(false);
+    }
+  };
+
   const handleDownloadContractPdf = async () => {
     const row = portal?.contract;
     if (!row?.contract_number) {
@@ -188,6 +287,7 @@ const DriverContractPortal = () => {
   }
 
   const c = portal?.contract;
+  const assignedDriver = portal?.assignedDriver;
   const recentExpenses = portal?.recentExpenses || [];
   const recentPayments = portal?.recentPayments || [];
 
@@ -201,6 +301,12 @@ const DriverContractPortal = () => {
               <p className="text-blue-100 text-sm">Contrato</p>
               <h1 className="text-2xl font-bold break-words">{c?.contract_number}</h1>
               <p className="text-blue-100 mt-1">{c?.client_name || 'Cliente'}</p>
+              {assignedDriver?.driver_name && (
+                <p className="text-sm mt-2 flex items-center gap-1.5 font-medium text-white">
+                  <User size={16} className="shrink-0 opacity-90" aria-hidden />
+                  <span>Chofer: {assignedDriver.driver_name}</span>
+                </p>
+              )}
               <p className="text-sm mt-2 opacity-90">
                 {c?.origin || '—'} → {c?.destination || '—'}
               </p>
@@ -307,6 +413,114 @@ const DriverContractPortal = () => {
           </form>
         </section>
 
+        <section className="bg-white rounded-xl shadow border border-violet-200 p-5">
+          <h2 className="text-lg font-semibold text-gray-900 mb-1 flex items-center gap-2">
+            <Upload size={20} className="text-violet-700" />
+            Importar casetas (CSV TAG)
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Sube el archivo <strong>movimientos_*.csv</strong> exportado de IAVE / EasyTrip. Crea un
+            gasto de caseta por cada peaje, igual que si lo capturaras uno por uno.
+          </p>
+          <label className="flex flex-col items-center justify-center w-full min-h-[100px] border-2 border-dashed border-violet-300 rounded-xl cursor-pointer bg-violet-50/50 hover:bg-violet-50 transition">
+            <span className="text-sm font-medium text-violet-800">Elegir archivo CSV</span>
+            <span className="text-xs text-violet-600 mt-1">movimientos_IMDM….csv</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={onCasetasCsvSelected}
+            />
+          </label>
+
+          {casetasParseErrors.length > 0 && (
+            <ul className="mt-2 text-xs text-amber-800 list-disc list-inside">
+              {casetasParseErrors.map((err) => (
+                <li key={err}>{err}</li>
+              ))}
+            </ul>
+          )}
+
+          {casetasPreview.length > 0 && (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-gray-800">
+                  {selectedCasetas.length} de {casetasPreview.length} seleccionado(s) ·{' '}
+                  {formatCurrency(selectedCasetasTotal)}
+                </p>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAllCasetasSelected(true)}
+                    className="text-violet-700 underline"
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllCasetasSelected(false)}
+                    className="text-gray-600 underline"
+                  >
+                    Ninguno
+                  </button>
+                </div>
+              </div>
+              <ul className="max-h-52 overflow-y-auto text-xs border border-gray-200 rounded-lg divide-y">
+                {casetasPreview.map((row, i) => {
+                  const key = getCasetaRowKey(row, i);
+                  const checked = row.selected !== false;
+                  return (
+                    <li key={key}>
+                      <label
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer min-h-[44px] ${
+                          checked ? 'bg-white' : 'bg-gray-50 opacity-70'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCasetaRow(key)}
+                          className="rounded border-gray-300 w-4 h-4 shrink-0"
+                        />
+                        <span className="text-gray-700 flex-1 min-w-0 leading-snug">
+                          {formatDate(row.expense_date)} · {row.notes}
+                        </span>
+                        <span className="font-semibold shrink-0">{formatCurrency(row.amount)}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Forma de pago (todos)
+                </label>
+                <select
+                  value={casetasImportMethod}
+                  onChange={(e) => setCasetasImportMethod(e.target.value)}
+                  className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={onImportCasetasCsv}
+                disabled={importingCasetas || selectedCasetas.length === 0}
+                className="w-full min-h-[48px] bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl disabled:opacity-50"
+              >
+                {importingCasetas
+                  ? 'Importando…'
+                  : `Registrar ${selectedCasetas.length} caseta(s)`}
+              </button>
+            </div>
+          )}
+        </section>
+
         <section className="bg-white rounded-xl shadow border border-gray-200 p-5">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Registrar ingreso</h2>
           <p className="text-sm text-gray-600 mb-4">
@@ -375,6 +589,7 @@ const DriverContractPortal = () => {
               {recentExpenses.map((ex) => {
                 const pending = ex.validation_status === 'pending';
                 const rejected = ex.validation_status === 'rejected';
+                const noteText = parseNotes(ex.notes);
                 return (
                   <li
                     key={ex.id}
@@ -383,11 +598,16 @@ const DriverContractPortal = () => {
                     }`}
                   >
                     <div className="flex justify-between gap-2 items-start">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <span className="font-medium">{ex.expense_type}</span>
                         <span className="text-gray-500 block text-xs">
                           {ex.driver_payment_method || '—'} · {formatDate(ex.expense_date)}
                         </span>
+                        {noteText ? (
+                          <span className="text-gray-700 block text-xs mt-1 leading-snug break-words">
+                            {noteText}
+                          </span>
+                        ) : null}
                         {pending && (
                           <span className="text-xs text-amber-700 block mt-0.5">
                             Pendiente de validación
@@ -400,14 +620,25 @@ const DriverContractPortal = () => {
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="font-semibold">{formatCurrency(ex.amount)}</span>
                         {pending && (
-                          <button
-                            type="button"
-                            onClick={() => startEditExpense(ex)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                            title="Corregir"
-                          >
-                            <Pencil size={18} />
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => startEditExpense(ex)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                              title="Corregir"
+                            >
+                              <Pencil size={18} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteExpense(ex)}
+                              disabled={deletingExpenseId === ex.id}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                              title="Eliminar"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>

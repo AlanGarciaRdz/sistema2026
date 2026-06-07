@@ -22,7 +22,12 @@ import Modal from '../components/Modal';
 import Button from '../components/Button';
 import { Link } from 'react-router-dom';
 import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet, Calendar, RefreshCw } from 'lucide-react';
-import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
+import {
+  buildPdfInfoFromRow,
+  generateContractPdf,
+  getContractBillingAmounts,
+  getContractAmountDue
+} from '../utils/contractPdfUtils';
 import {
   formatDateLocal,
   formatDateWithWeekdayLocal,
@@ -569,7 +574,7 @@ const Contracts = () => {
   );
 
   const filteredTotalSum = useMemo(
-    () => filteredContracts.reduce((s, row) => s + (parseFloat(row.total_amount) || 0), 0),
+    () => filteredContracts.reduce((s, row) => s + getContractAmountDue(row), 0),
     [filteredContracts]
   );
 
@@ -806,9 +811,10 @@ const Contracts = () => {
       ),
       width: '170px',
       render: (row) => {
-        const total = parseFloat(row.total_amount) || 0;
+        const billing = getContractBillingAmounts(row);
+        const amountDue = billing.grandTotal;
         const paid = getPaidAmount(row.id);
-        const remaining = total - paid;
+        const remaining = amountDue - paid;
         const hasPayments = paid > 0;
         const byConcept = getExpensesByConcept(row.id);
         const totalExpenses = Object.values(byConcept).reduce((s, v) => s + v, 0);
@@ -824,11 +830,26 @@ const Contracts = () => {
 
         return (
           <div className="flex flex-col gap-0.5">
-            <span className="font-medium">{formatCurrency(total)}</span>
+            <span className="font-medium">{formatCurrency(amountDue)}</span>
+            {billing.includeIva && (
+              <span className="text-[11px] text-gray-500 leading-snug">
+                Subtotal {formatCurrency(billing.subtotal)} + IVA {formatCurrency(billing.iva)}
+              </span>
+            )}
             {hasPayments && (
               <>
                 <span className="text-xs text-green-600">Abonado: {formatCurrency(paid)}</span>
-                <span className="text-xs text-amber-600">Falta: {formatCurrency(remaining)}</span>
+                <span
+                  className={`text-xs font-medium ${
+                    remaining > 0.01
+                      ? 'text-amber-600'
+                      : remaining < -0.01
+                        ? 'text-red-600'
+                        : 'text-green-700'
+                  }`}
+                >
+                  Falta: {formatCurrency(remaining)}
+                </span>
               </>
             )}
             {hasExpenses && (

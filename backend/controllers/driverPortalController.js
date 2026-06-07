@@ -34,6 +34,48 @@ const isDriverPortalExpense = (notes) => {
   }
 };
 
+const resolveAssignedDriver = async (contract) => {
+  const assignmentResult = await pool.query(
+    `SELECT a.id, a.driver_id, a.driving_date, a.assigned_date,
+            d.name AS driver_name,
+            v.vehicle_code, v.license_plate
+     FROM assignments a
+     LEFT JOIN drivers d ON a.driver_id = d.id
+     LEFT JOIN vehicles v ON a.vehicle_id = v.id
+     WHERE a.contract_id = $1
+     ORDER BY a.driving_date DESC NULLS LAST, a.id DESC
+     LIMIT 1`,
+    [contract.id]
+  );
+
+  const row = assignmentResult.rows[0];
+  if (row?.driver_name) {
+    return {
+      driver_name: row.driver_name,
+      vehicle_code: row.vehicle_code,
+      license_plate: row.license_plate,
+      driving_date: row.driving_date
+    };
+  }
+
+  try {
+    const notes = typeof contract.notes === 'string' ? JSON.parse(contract.notes || '{}') : {};
+    const a = notes?.assignment;
+    if (a?.driver_name) {
+      return {
+        driver_name: a.driver_name,
+        vehicle_code: a.vehicle_code || null,
+        license_plate: a.license_plate || null,
+        driving_date: a.driving_date || null
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
+};
+
 const getDriverPortal = async (req, res) => {
   try {
     const { contractNumber } = req.params;
@@ -41,6 +83,8 @@ const getDriverPortal = async (req, res) => {
     if (!contract) {
       return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
     }
+
+    const assignedDriver = await resolveAssignedDriver(contract);
 
     const expensesResult = await pool.query(
       `SELECT e.id, e.expense_type, e.amount, e.expense_date, e.notes, e.validation_status,
@@ -67,6 +111,7 @@ const getDriverPortal = async (req, res) => {
       success: true,
       data: {
         contract,
+        assignedDriver,
         recentExpenses: expensesResult.rows,
         recentPayments: paymentsResult.rows
       }
@@ -190,6 +235,136 @@ const putDriverExpense = async (req, res) => {
   }
 };
 
+const deleteDriverExpense = async (req, res) => {
+  try {
+    const { contractNumber, expenseId } = req.params;
+    const contract = await getContractByNumber(contractNumber);
+    if (!contract) {
+      return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
+    }
+
+    const ex = await pool.query(
+      'SELECT * FROM expenses WHERE id = $1 AND contract_id = $2',
+      [expenseId, contract.id]
+    );
+    if (ex.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Gasto no encontrado' });
+    }
+    const row = ex.rows[0];
+    if (row.validation_status !== 'pending' || !isDriverPortalExpense(row.notes)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Solo puede eliminar gastos pendientes registrados desde aquí'
+      });
+    }
+
+    await pool.query('DELETE FROM expenses WHERE id = $1 AND contract_id = $2', [
+      expenseId,
+      contract.id
+    ]);
+
+    res.json({ success: true, message: 'Gasto eliminado' });
+  } catch (error) {
+    console.error('Error driver portal delete expense:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const extractTagFolio = (notes) => {
+  try {
+    const n = typeof notes === 'string' ? JSON.parse(notes || '{}') : notes || {};
+    return n.tag_folio != null ? String(n.tag_folio) : null;
+  } catch {
+    return null;
+  }
+};
+
+const postDriverExpensesBulk = async (req, res) => {
+  try {
+    const { contractNumber } = req.params;
+    const contract = await getContractByNumber(contractNumber);
+    if (!contract) {
+      return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
+    }
+
+    const { items, payment_method } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'No hay gastos para importar' });
+    }
+
+    const method = payment_method || 'Transferencia';
+    if (!PAYMENT_METHODS.includes(method)) {
+      return res.status(400).json({ success: false, error: 'Forma de pago no válida' });
+    }
+
+    const existingRes = await pool.query(
+      `SELECT notes FROM expenses WHERE contract_id = $1`,
+      [contract.id]
+    );
+    const usedFolios = new Set();
+    for (const row of existingRes.rows) {
+      const f = extractTagFolio(row.notes);
+      if (f) usedFolios.add(f);
+    }
+
+    const created = [];
+    let skipped = 0;
+
+    for (const item of items) {
+      const amount = parseFloat(item.amount);
+      if (!item.expense_type || !Number.isFinite(amount) || amount <= 0) {
+        skipped++;
+        continue;
+      }
+
+      const folio = item.tag_folio != null && item.tag_folio !== '' ? String(item.tag_folio) : null;
+      if (folio && usedFolios.has(folio)) {
+        skipped++;
+        continue;
+      }
+
+      const expenseNotes = JSON.stringify({
+        driver_portal: true,
+        payment_method: method,
+        extra_notes: item.notes || '',
+        tag_folio: folio,
+        tag_import: 'casetas_csv',
+        caseta: item.caseta || null,
+        carril: item.carril || null
+      });
+
+      const ins = await pool.query(
+        `INSERT INTO expenses (
+          contract_id, expense_type, amount, payment_account_id,
+          business_unit, expense_date, notes, validation_status, driver_payment_method
+        ) VALUES ($1, $2, $3, NULL, NULL, $4, $5, 'pending', $6)
+        RETURNING id, expense_type, amount, expense_date, validation_status`,
+        [
+          contract.id,
+          item.expense_type,
+          amount,
+          item.expense_date || new Date().toISOString().slice(0, 10),
+          expenseNotes,
+          method
+        ]
+      );
+
+      if (folio) usedFolios.add(folio);
+      created.push(ins.rows[0]);
+    }
+
+    res.status(201).json({
+      success: true,
+      created: created.length,
+      skipped,
+      data: created
+    });
+  } catch (error) {
+    console.error('Error driver portal bulk expenses:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 const postDriverPayment = async (req, res) => {
   try {
     const { contractNumber } = req.params;
@@ -240,6 +415,8 @@ const postDriverPayment = async (req, res) => {
 module.exports = {
   getDriverPortal,
   postDriverExpense,
+  postDriverExpensesBulk,
   putDriverExpense,
+  deleteDriverExpense,
   postDriverPayment
 };

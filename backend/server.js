@@ -23,6 +23,7 @@ const assignmentsRoutes = require('./routes/assignments');
 const dashboardRoutes = require('./routes/dashboard');
 const maintenanceRoutes = require('./routes/maintenance');
 const driverPortalRoutes = require('./routes/driverPortal');
+const vehicleReportPortalRoutes = require('./routes/vehicleReportPortal');
 
 // Use routes
 app.use('/api/clients', clientsRoutes);
@@ -38,6 +39,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
 // Público para choferes (sin sesión); la app del panel usa login en el frontend.
 app.use('/api/driver-portal', driverPortalRoutes);
+app.use('/api/vehicle-report-portal', vehicleReportPortalRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

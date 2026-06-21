@@ -70,3 +70,23 @@ export const ITEM_KIND_PRESETS = {
   tires: { title: 'Llantas', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
   custom: { title: '', interval_km: null, warn_before_km: 5000, critical_before_km: 2000 }
 };
+
+export const INCIDENT_TYPE_LABELS = {
+  crash: 'Choque / accidente',
+  noise: 'Ruido extraño',
+  damage: 'Daño físico',
+  mechanical: 'Falla mecánica',
+  other: 'Otro'
+};
+
+export const INCIDENT_SEVERITY_LABELS = {
+  low: 'Leve',
+  moderate: 'Moderado',
+  high: 'Grave'
+};
+
+export const INCIDENT_STATUS_LABELS = {
+  open: 'Abierto',
+  in_review: 'En revisión',
+  resolved: 'Resuelto'
+};

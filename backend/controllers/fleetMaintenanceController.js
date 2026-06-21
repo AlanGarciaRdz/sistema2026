@@ -5,6 +5,16 @@ const {
   resolveEffectiveMileage
 } = require('../utils/maintenanceStatus');
 
+async function queryRowsSafe(queryText, params, label) {
+  try {
+    const result = await pool.query(queryText, params);
+    return result.rows;
+  } catch (error) {
+    console.warn(`[fleetMaintenance] ${label}:`, error.message);
+    return [];
+  }
+}
+
 async function bumpVehicleMileageIfHigher(vehicleId, km, dateStr) {
   const n = parseInt(km, 10);
   if (!Number.isFinite(n)) return;
@@ -155,38 +165,61 @@ const getFleetOverview = async (req, res) => {
       ORDER BY vehicle_code NULLS LAST, license_plate
     `);
 
-    const itemsResult = await pool.query(`
-      SELECT * FROM vehicle_service_items
-      WHERE is_active = TRUE
-      ORDER BY vehicle_id, title
-    `);
+    const itemRows = await queryRowsSafe(
+      `SELECT * FROM vehicle_service_items
+       WHERE is_active = TRUE
+       ORDER BY vehicle_id, title`,
+      [],
+      'vehicle_service_items'
+    );
 
-    const maintenanceResult = await pool.query(`
-      SELECT m.*, v.vehicle_code
-      FROM vehicle_maintenance m
-      LEFT JOIN vehicles v ON m.vehicle_id = v.id
-      ORDER BY m.maintenance_date DESC, m.id DESC
-      LIMIT 500
-    `);
+    const maintenanceRows = await queryRowsSafe(
+      `SELECT m.*, v.vehicle_code
+       FROM vehicle_maintenance m
+       LEFT JOIN vehicles v ON m.vehicle_id = v.id
+       ORDER BY m.maintenance_date DESC, m.id DESC
+       LIMIT 500`,
+      [],
+      'vehicle_maintenance history'
+    );
+
+    const incidentRows = await queryRowsSafe(
+      `SELECT r.*, v.vehicle_code, v.license_plate, v.brand, v.model
+       FROM vehicle_incident_reports r
+       LEFT JOIN vehicles v ON r.vehicle_id = v.id
+       ORDER BY r.report_date DESC, r.id DESC
+       LIMIT 500`,
+      [],
+      'vehicle_incident_reports'
+    );
 
     const itemsByVehicle = new Map();
-    for (const row of itemsResult.rows) {
+    for (const row of itemRows) {
       const list = itemsByVehicle.get(row.vehicle_id) || [];
       list.push(row);
       itemsByVehicle.set(row.vehicle_id, list);
     }
 
     const maintByVehicle = new Map();
-    for (const row of maintenanceResult.rows) {
+    for (const row of maintenanceRows) {
       if (!row.vehicle_id) continue;
       const list = maintByVehicle.get(row.vehicle_id) || [];
       if (list.length < 5) list.push(row);
       maintByVehicle.set(row.vehicle_id, list);
     }
 
+    const incidentsByVehicle = new Map();
+    for (const row of incidentRows) {
+      if (!row.vehicle_id) continue;
+      const list = incidentsByVehicle.get(row.vehicle_id) || [];
+      if (list.length < 5) list.push(row);
+      incidentsByVehicle.set(row.vehicle_id, list);
+    }
+
     const vehicles = vehiclesResult.rows.map((v) => {
       const rawItems = itemsByVehicle.get(v.id) || [];
       const recent = maintByVehicle.get(v.id) || [];
+      const recentIncidents = incidentsByVehicle.get(v.id) || [];
       const mileage = resolveEffectiveMileage(v.current_mileage, rawItems, recent);
       const serviceItems = rawItems.map((row) => mapServiceItemRow(row, mileage.effectiveKm));
       const worst = serviceItems.reduce((acc, it) => {
@@ -201,7 +234,8 @@ const getFleetOverview = async (req, res) => {
         mileage_source: mileage.mileageSource,
         service_items: serviceItems,
         fleet_status: serviceItems.length ? worst : 'unknown',
-        recent_maintenance: recent
+        recent_maintenance: recent,
+        recent_incident_reports: recentIncidents
       };
     });
 
@@ -423,11 +457,173 @@ const deleteServiceItem = async (req, res) => {
   }
 };
 
+const getIncidentReports = async (req, res) => {
+  try {
+    const rows = await queryRowsSafe(
+      `SELECT r.*, v.vehicle_code, v.license_plate, v.brand, v.model,
+        COALESCE(v.vehicle_code, v.license_plate, 'N/A') AS vehicle_label
+       FROM vehicle_incident_reports r
+       LEFT JOIN vehicles v ON r.vehicle_id = v.id
+       ORDER BY r.report_date DESC, r.id DESC`,
+      [],
+      'vehicle_incident_reports list'
+    );
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching incident reports:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const createIncidentReport = async (req, res) => {
+  try {
+    const {
+      vehicle_id,
+      report_date,
+      reported_by,
+      report_type,
+      title,
+      description,
+      severity,
+      mileage,
+      status,
+      resolution_notes
+    } = req.body;
+
+    if (!vehicle_id || !report_date || !reported_by?.trim() || !title?.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Unidad, fecha, quien reporta y título son obligatorios'
+      });
+    }
+
+    const km =
+      mileage != null && mileage !== '' && Number.isFinite(parseInt(mileage, 10))
+        ? parseInt(mileage, 10)
+        : null;
+
+    const result = await pool.query(
+      `INSERT INTO vehicle_incident_reports (
+        vehicle_id, report_date, reported_by, report_type, title, description,
+        severity, mileage, status, resolution_notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *`,
+      [
+        vehicle_id,
+        report_date,
+        String(reported_by).trim(),
+        report_type || 'other',
+        String(title).trim(),
+        description || null,
+        severity || 'moderate',
+        km,
+        status || 'open',
+        resolution_notes || null
+      ]
+    );
+
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error creating incident report:', error);
+    const msg = String(error.message || '');
+    if (msg.includes('vehicle_incident_reports') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Ejecuta la migración add_vehicle_incident_reports.sql en la base de datos'
+      });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const updateIncidentReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      vehicle_id,
+      report_date,
+      reported_by,
+      report_type,
+      title,
+      description,
+      severity,
+      mileage,
+      status,
+      resolution_notes
+    } = req.body;
+
+    const km =
+      mileage != null && mileage !== '' && Number.isFinite(parseInt(mileage, 10))
+        ? parseInt(mileage, 10)
+        : null;
+
+    const result = await pool.query(
+      `UPDATE vehicle_incident_reports SET
+        vehicle_id = COALESCE($1, vehicle_id),
+        report_date = COALESCE($2, report_date),
+        reported_by = COALESCE($3, reported_by),
+        report_type = COALESCE($4, report_type),
+        title = COALESCE($5, title),
+        description = $6,
+        severity = COALESCE($7, severity),
+        mileage = $8,
+        status = COALESCE($9, status),
+        resolution_notes = $10,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $11
+      RETURNING *`,
+      [
+        vehicle_id,
+        report_date,
+        reported_by ? String(reported_by).trim() : null,
+        report_type,
+        title ? String(title).trim() : null,
+        description || null,
+        severity,
+        km,
+        status,
+        resolution_notes || null,
+        id
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Reporte no encontrado' });
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating incident report:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const deleteIncidentReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'DELETE FROM vehicle_incident_reports WHERE id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Reporte no encontrado' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error deleting incident report:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getFleetOverview,
   updateVehicleMileage,
   createServiceItem,
   updateServiceItem,
   deleteServiceItem,
+  getIncidentReports,
+  createIncidentReport,
+  updateIncidentReport,
+  deleteIncidentReport,
   mapServiceItemRow
 };

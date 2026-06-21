@@ -17,6 +17,7 @@ import PaymentAccounts from './pages/PaymentAccounts';
 import Trips from './pages/Trips';
 import Maintenance from './pages/Maintenance';
 import DriverContractPortal from './pages/DriverContractPortal';
+import VehicleReportPortal from './pages/VehicleReportPortal';
 
 function MainLayout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -47,6 +48,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           {/* Portal chofer: sin login (acceso por número de contrato en la URL). No mover dentro de ProtectedRoute. */}
           <Route path="/c/:contractNumber" element={<DriverContractPortal />} />
+          <Route path="/u/:vehicleKey" element={<VehicleReportPortal />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
               <Route index element={<Dashboard />} />

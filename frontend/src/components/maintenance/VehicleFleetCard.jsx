@@ -1,7 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import ServiceStatusBar from './ServiceStatusBar';
 import Button from '../Button';
-import { STATUS_STYLES, STATUS_LABELS, formatKm } from '../../utils/maintenanceStatus';
+import {
+  STATUS_STYLES,
+  STATUS_LABELS,
+  formatKm,
+  INCIDENT_TYPE_LABELS,
+  INCIDENT_SEVERITY_LABELS,
+  INCIDENT_STATUS_LABELS
+} from '../../utils/maintenanceStatus';
+
+const severityBadge = (severity) => {
+  if (severity === 'high') return 'bg-red-100 text-red-800';
+  if (severity === 'low') return 'bg-slate-100 text-slate-700';
+  return 'bg-amber-100 text-amber-900';
+};
+
+const statusBadge = (status) => {
+  if (status === 'resolved') return 'bg-emerald-100 text-emerald-800';
+  if (status === 'in_review') return 'bg-blue-100 text-blue-800';
+  return 'bg-orange-100 text-orange-800';
+};
 
 const VehicleFleetCard = ({
   vehicle,
@@ -9,6 +28,9 @@ const VehicleFleetCard = ({
   onAddServiceItem,
   onEditServiceItem,
   onRegisterMaintenance,
+  onAddIncidentReport,
+  onEditIncidentReport,
+  onCopyReportLink,
   savingMileage
 }) => {
   const [kmInput, setKmInput] = useState(
@@ -41,6 +63,12 @@ const VehicleFleetCard = ({
     if (km != null && (!Number.isFinite(km) || km < 0)) return;
     onSaveMileage(vehicle.id, km, kmDate);
   };
+
+  const recentMaintenance = vehicle.recent_maintenance || [];
+  const recentReports = vehicle.recent_incident_reports || [];
+  const showIncidents = Boolean(onAddIncidentReport);
+  const hasHistory =
+    recentMaintenance.length > 0 || (showIncidents && recentReports.length > 0);
 
   return (
     <div className={`rounded-xl border bg-white p-4 shadow-sm ring-1 ${fleetStyle.ring}`}>
@@ -103,6 +131,24 @@ const VehicleFleetCard = ({
         <Button variant="primary" className="text-xs" onClick={() => onRegisterMaintenance(vehicle)}>
           Registrar servicio
         </Button>
+        {showIncidents && (
+          <Button
+            variant="secondary"
+            className="text-xs"
+            onClick={() => onAddIncidentReport(vehicle)}
+          >
+            + Reportar incidente
+          </Button>
+        )}
+        {onCopyReportLink && (
+          <Button
+            variant="secondary"
+            className="text-xs"
+            onClick={() => onCopyReportLink(vehicle)}
+          >
+            Link chofer
+          </Button>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -126,26 +172,84 @@ const VehicleFleetCard = ({
         )}
       </div>
 
-      {vehicle.recent_maintenance?.length > 0 && (
-        <details className="mt-3 border-t pt-3">
-          <summary className="cursor-pointer text-sm font-medium text-gray-700">
-            Últimos servicios ({vehicle.recent_maintenance.length})
-          </summary>
-          <ul className="mt-2 space-y-2 text-xs text-gray-600">
-            {vehicle.recent_maintenance.map((m) => (
-              <li key={m.id} className="rounded bg-gray-50 p-2">
-                <span className="font-medium text-gray-800">
-                  {m.maintenance_date
-                    ? new Date(m.maintenance_date).toLocaleDateString('es-MX')
-                    : '—'}
-                </span>
-                {m.mileage != null && ` · ${formatKm(m.mileage)} km`}
-                {m.maintenance_type && ` · ${m.maintenance_type}`}
-                {m.notes && <p className="mt-1 whitespace-pre-wrap text-gray-500">{m.notes}</p>}
-              </li>
-            ))}
-          </ul>
-        </details>
+      {hasHistory && (
+        <div className="mt-3 space-y-2 border-t pt-3">
+          {recentMaintenance.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                Últimos servicios ({recentMaintenance.length})
+              </summary>
+              <ul className="mt-2 space-y-2 text-xs text-gray-600">
+                {recentMaintenance.map((m) => (
+                  <li key={m.id} className="rounded bg-gray-50 p-2">
+                    <span className="font-medium text-gray-800">
+                      {m.maintenance_date
+                        ? new Date(m.maintenance_date).toLocaleDateString('es-MX')
+                        : '—'}
+                    </span>
+                    {m.mileage != null && ` · ${formatKm(m.mileage)} km`}
+                    {m.maintenance_type && ` · ${m.maintenance_type}`}
+                    {m.notes && (
+                      <p className="mt-1 whitespace-pre-wrap text-gray-500">{m.notes}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {showIncidents && recentReports.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                Reportes e incidentes ({recentReports.length})
+              </summary>
+              <ul className="mt-2 space-y-2 text-xs text-gray-600">
+                {recentReports.map((r) => (
+                  <li
+                    key={r.id}
+                    className="rounded border border-orange-100 bg-orange-50/50 p-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium text-gray-800">
+                        {r.report_date
+                          ? new Date(r.report_date).toLocaleDateString('es-MX')
+                          : '—'}
+                      </span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${severityBadge(r.severity)}`}
+                      >
+                        {INCIDENT_SEVERITY_LABELS[r.severity] || r.severity}
+                      </span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusBadge(r.status)}`}
+                      >
+                        {INCIDENT_STATUS_LABELS[r.status] || r.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 font-medium text-gray-900">{r.title}</p>
+                    <p className="text-gray-500">
+                      {INCIDENT_TYPE_LABELS[r.report_type] || r.report_type}
+                      {r.reported_by && ` · Reportó: ${r.reported_by}`}
+                      {r.mileage != null && ` · ${formatKm(r.mileage)} km`}
+                    </p>
+                    {r.description && (
+                      <p className="mt-1 whitespace-pre-wrap text-gray-600">{r.description}</p>
+                    )}
+                    {onEditIncidentReport && (
+                      <button
+                        type="button"
+                        className="mt-1 text-blue-600 hover:underline"
+                        onClick={() => onEditIncidentReport(vehicle, r)}
+                      >
+                        Editar
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
     </div>
   );

@@ -9,6 +9,10 @@ import {
   createServiceItem,
   updateServiceItem,
   deleteServiceItem,
+  getIncidentReports,
+  createIncidentReport,
+  updateIncidentReport,
+  deleteIncidentReport,
   getVehicles,
   getPaymentAccounts
 } from '../services/api';
@@ -21,7 +25,14 @@ import Button from '../components/Button';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import VehicleFleetCard from '../components/maintenance/VehicleFleetCard';
-import { ITEM_KIND_PRESETS, formatKm } from '../utils/maintenanceStatus';
+import { copyVehicleReportPortalLink } from '../utils/vehicleReportPortal';
+import {
+  ITEM_KIND_PRESETS,
+  formatKm,
+  INCIDENT_TYPE_LABELS,
+  INCIDENT_SEVERITY_LABELS,
+  INCIDENT_STATUS_LABELS
+} from '../utils/maintenanceStatus';
 
 const TABS = [
   { id: 'fleet', label: 'Flota y alertas' },
@@ -54,10 +65,24 @@ const emptyServiceItemForm = () => ({
   notes: ''
 });
 
+const emptyIncidentForm = () => ({
+  vehicle_id: '',
+  report_date: new Date().toISOString().split('T')[0],
+  reported_by: '',
+  report_type: 'crash',
+  title: '',
+  description: '',
+  severity: 'moderate',
+  mileage: '',
+  status: 'open',
+  resolution_notes: ''
+});
+
 const Maintenance = () => {
   const [tab, setTab] = useState('fleet');
   const [fleet, setFleet] = useState([]);
   const [maintenance, setMaintenance] = useState([]);
+  const [incidentReports, setIncidentReports] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loadingFleet, setLoadingFleet] = useState(true);
@@ -65,20 +90,26 @@ const Maintenance = () => {
   const [savingMileageId, setSavingMileageId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
+  const [isIncidentModalOpen, setIsIncidentModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const [editingServiceItem, setEditingServiceItem] = useState(null);
+  const [editingIncident, setEditingIncident] = useState(null);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyMaintenanceForm());
   const [serviceForm, setServiceForm] = useState(emptyServiceItemForm());
+  const [incidentForm, setIncidentForm] = useState(emptyIncidentForm());
   const [historyVehicleFilter, setHistoryVehicleFilter] = useState('');
   const [historyUnitSearch, setHistoryUnitSearch] = useState('');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
 
   const fetchFleet = useCallback(async () => {
     try {
       setLoadingFleet(true);
       const response = await getMaintenanceFleet();
-      setFleet(response.data.data?.vehicles || []);
+      setFleet(response.data?.data?.vehicles || []);
     } catch (error) {
+      console.error('Error loading fleet:', error);
+      setFleet([]);
       setToast({ message: 'Error al cargar flota', type: 'error' });
     } finally {
       setLoadingFleet(false);
@@ -97,20 +128,32 @@ const Maintenance = () => {
     }
   }, []);
 
+  const fetchIncidentReports = useCallback(async () => {
+    try {
+      const response = await getIncidentReports();
+      setIncidentReports(response.data?.data || []);
+    } catch (error) {
+      console.warn('Incident reports not available:', error);
+      setIncidentReports([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchFleet();
     fetchMaintenance();
+    fetchIncidentReports();
     getVehicles()
       .then((r) => setVehicles(r.data.data || []))
       .catch(() => {});
     getPaymentAccounts()
       .then((r) => setAccounts(r.data.data || []))
       .catch(() => {});
-  }, [fetchFleet, fetchMaintenance]);
+  }, [fetchFleet, fetchMaintenance, fetchIncidentReports]);
 
   const refreshAll = () => {
     fetchFleet();
     fetchMaintenance();
+    fetchIncidentReports();
   };
 
   const handleSaveMileage = async (vehicleId, km, kmDate) => {
@@ -246,6 +289,75 @@ const Maintenance = () => {
       fetchFleet();
     } catch {
       setToast({ message: 'Error al eliminar', type: 'error' });
+    }
+  };
+
+  const openIncidentModal = (vehicle, report = null) => {
+    setEditingIncident(report);
+    if (report) {
+      setIncidentForm({
+        vehicle_id: vehicle.id,
+        report_date: report.report_date ? String(report.report_date).slice(0, 10) : '',
+        reported_by: report.reported_by || '',
+        report_type: report.report_type || 'other',
+        title: report.title || '',
+        description: report.description || '',
+        severity: report.severity || 'moderate',
+        mileage: report.mileage != null ? String(report.mileage) : '',
+        status: report.status || 'open',
+        resolution_notes: report.resolution_notes || ''
+      });
+    } else {
+      setIncidentForm({
+        ...emptyIncidentForm(),
+        vehicle_id: vehicle.id,
+        mileage: vehicle.current_mileage != null ? String(vehicle.current_mileage) : ''
+      });
+    }
+    setIsIncidentModalOpen(true);
+  };
+
+  const handleIncidentSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        vehicle_id: incidentForm.vehicle_id,
+        report_date: incidentForm.report_date,
+        reported_by: incidentForm.reported_by.trim(),
+        report_type: incidentForm.report_type,
+        title: incidentForm.title.trim(),
+        description: incidentForm.description.trim() || null,
+        severity: incidentForm.severity,
+        mileage: incidentForm.mileage ? parseInt(incidentForm.mileage, 10) : null,
+        status: incidentForm.status,
+        resolution_notes: incidentForm.resolution_notes.trim() || null
+      };
+      if (editingIncident) {
+        await updateIncidentReport(editingIncident.id, payload);
+        setToast({ message: 'Reporte actualizado', type: 'success' });
+      } else {
+        await createIncidentReport(payload);
+        setToast({ message: 'Reporte registrado', type: 'success' });
+      }
+      setIsIncidentModalOpen(false);
+      setEditingIncident(null);
+      refreshAll();
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Error al guardar reporte';
+      setToast({ message: msg, type: 'error' });
+    }
+  };
+
+  const handleDeleteIncident = async () => {
+    if (!editingIncident || !window.confirm('¿Eliminar este reporte?')) return;
+    try {
+      await deleteIncidentReport(editingIncident.id);
+      setToast({ message: 'Reporte eliminado', type: 'success' });
+      setIsIncidentModalOpen(false);
+      setEditingIncident(null);
+      refreshAll();
+    } catch {
+      setToast({ message: 'Error al eliminar reporte', type: 'error' });
     }
   };
 
@@ -389,6 +501,37 @@ const Maintenance = () => {
     { header: 'Cuenta', accessor: 'account_name' }
   ];
 
+  const incidentColumns = [
+    {
+      header: 'Unidad',
+      accessor: 'vehicle_label',
+      render: (row) => row.vehicle_label || getVehicleLabel(row)
+    },
+    { header: 'Fecha', accessor: 'report_date', render: (row) => formatDate(row.report_date) },
+    {
+      header: 'Tipo',
+      accessor: 'report_type',
+      render: (row) => INCIDENT_TYPE_LABELS[row.report_type] || row.report_type
+    },
+    { header: 'Título', accessor: 'title' },
+    { header: 'Reportó', accessor: 'reported_by' },
+    {
+      header: 'Gravedad',
+      accessor: 'severity',
+      render: (row) => INCIDENT_SEVERITY_LABELS[row.severity] || row.severity
+    },
+    {
+      header: 'Estado',
+      accessor: 'status',
+      render: (row) => INCIDENT_STATUS_LABELS[row.status] || row.status
+    },
+    {
+      header: 'Km',
+      accessor: 'mileage',
+      render: (row) => (row.mileage != null ? row.mileage.toLocaleString() : '-')
+    }
+  ];
+
   const sortedFleet = [...fleet].sort((a, b) => {
     const rank = { overdue: 4, critical: 3, warning: 2, ok: 1, unknown: 0 };
     return (rank[b.fleet_status] || 0) - (rank[a.fleet_status] || 0);
@@ -406,7 +549,21 @@ const Maintenance = () => {
     return label.includes(q) || plate.includes(q) || code.includes(q);
   });
 
-  const historyFilterActive = historyVehicleFilter || historyUnitSearch.trim();
+  const filteredIncidents = incidentReports.filter((row) => {
+    if (historyVehicleFilter && String(row.vehicle_id) !== String(historyVehicleFilter)) {
+      return false;
+    }
+    const q = historyUnitSearch.trim().toLowerCase();
+    if (!q) return true;
+    const label = (row.vehicle_label || getVehicleLabel(row)).toLowerCase();
+    const plate = String(row.license_plate || '').toLowerCase();
+    const code = String(row.vehicle_code || '').toLowerCase();
+    const title = String(row.title || '').toLowerCase();
+    return label.includes(q) || plate.includes(q) || code.includes(q) || title.includes(q);
+  });
+
+  const historyFilterActive =
+    historyVehicleFilter || historyUnitSearch.trim() || historyTypeFilter !== 'all';
 
   if (loadingFleet && loadingHistory && !fleet.length) return <Loading />;
 
@@ -463,6 +620,9 @@ const Maintenance = () => {
                   onAddServiceItem={openServiceItemModal}
                   onEditServiceItem={openServiceItemModal}
                   onRegisterMaintenance={openMaintenanceModal}
+                  onAddIncidentReport={openIncidentModal}
+                  onEditIncidentReport={openIncidentModal}
+                  onCopyReportLink={(vehicle) => copyVehicleReportPortalLink(vehicle, setToast)}
                 />
               ))}
             </div>
@@ -479,7 +639,19 @@ const Maintenance = () => {
             <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">
               Filtrar historial
             </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="min-w-0">
+                <label className="mb-1 block text-xs font-medium text-gray-600">Tipo</label>
+                <select
+                  value={historyTypeFilter}
+                  onChange={(e) => setHistoryTypeFilter(e.target.value)}
+                  className="w-full min-h-[44px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                >
+                  <option value="all">Servicios y reportes</option>
+                  <option value="services">Solo servicios</option>
+                  <option value="reports">Solo reportes / incidentes</option>
+                </select>
+              </div>
               <div className="min-w-0">
                 <label className="mb-1 block text-xs font-medium text-gray-600">Unidad</label>
                 <select
@@ -515,13 +687,14 @@ const Maintenance = () => {
                     onClick={() => {
                       setHistoryVehicleFilter('');
                       setHistoryUnitSearch('');
+                      setHistoryTypeFilter('all');
                     }}
                   >
                     Limpiar
                   </Button>
                 )}
                 <p className="pb-2 text-sm text-gray-500">
-                  {filteredMaintenance.length} de {maintenance.length} registros
+                  {filteredMaintenance.length} servicios · {filteredIncidents.length} reportes
                 </p>
               </div>
             </div>
@@ -529,18 +702,60 @@ const Maintenance = () => {
           {loadingHistory ? (
             <Loading />
           ) : (
-            <Table
-              columns={columns}
-              data={filteredMaintenance}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              sortable
-            />
-          )}
-          {!loadingHistory && maintenance.length > 0 && filteredMaintenance.length === 0 && (
-            <p className="mt-4 text-center text-sm text-gray-500">
-              No hay registros con ese filtro.
-            </p>
+            <>
+              {(historyTypeFilter === 'all' || historyTypeFilter === 'services') && (
+                <div className="mb-6">
+                  <h3 className="mb-2 text-sm font-semibold text-gray-800">
+                    Servicios y mantenimiento
+                  </h3>
+                  <Table
+                    columns={columns}
+                    data={filteredMaintenance}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    sortable
+                  />
+                  {maintenance.length > 0 && filteredMaintenance.length === 0 && (
+                    <p className="mt-2 text-center text-sm text-gray-500">
+                      No hay servicios con ese filtro.
+                    </p>
+                  )}
+                </div>
+              )}
+              {(historyTypeFilter === 'all' || historyTypeFilter === 'reports') && (
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-800">
+                    Reportes e incidentes
+                  </h3>
+                  <Table
+                    columns={incidentColumns}
+                    data={filteredIncidents}
+                    onEdit={(row) => {
+                      const v = fleet.find((f) => f.id === row.vehicle_id) || {
+                        id: row.vehicle_id
+                      };
+                      openIncidentModal(v, row);
+                    }}
+                    onDelete={async (row) => {
+                      if (!window.confirm('¿Eliminar este reporte?')) return;
+                      try {
+                        await deleteIncidentReport(row.id);
+                        setToast({ message: 'Reporte eliminado', type: 'success' });
+                        refreshAll();
+                      } catch {
+                        setToast({ message: 'Error al eliminar reporte', type: 'error' });
+                      }
+                    }}
+                    sortable
+                  />
+                  {incidentReports.length > 0 && filteredIncidents.length === 0 && (
+                    <p className="mt-2 text-center text-sm text-gray-500">
+                      No hay reportes con ese filtro.
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -755,6 +970,115 @@ const Maintenance = () => {
             <Button variant="primary" type="submit">
               {editingRecord ? 'Actualizar' : 'Guardar'}
             </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isIncidentModalOpen}
+        onClose={() => {
+          setIsIncidentModalOpen(false);
+          setEditingIncident(null);
+        }}
+        title={editingIncident ? 'Editar reporte' : 'Reportar incidente'}
+        size="md"
+      >
+        <form onSubmit={handleIncidentSubmit} className="space-y-4">
+          <FormInput
+            label="Fecha del incidente"
+            type="date"
+            value={incidentForm.report_date}
+            onChange={(e) => setIncidentForm({ ...incidentForm, report_date: e.target.value })}
+            required
+          />
+          <FormInput
+            label="Quién reporta"
+            value={incidentForm.reported_by}
+            onChange={(e) => setIncidentForm({ ...incidentForm, reported_by: e.target.value })}
+            placeholder="Nombre del chofer, encargado, taller..."
+            required
+          />
+          <FormSelect
+            label="Tipo de reporte"
+            value={incidentForm.report_type}
+            onChange={(e) => setIncidentForm({ ...incidentForm, report_type: e.target.value })}
+            options={Object.entries(INCIDENT_TYPE_LABELS).map(([value, label]) => ({
+              value,
+              label
+            }))}
+          />
+          <FormInput
+            label="Resumen (título)"
+            value={incidentForm.title}
+            onChange={(e) => setIncidentForm({ ...incidentForm, title: e.target.value })}
+            placeholder="Ej. Golpe en puerta lateral derecha"
+            required
+          />
+          <FormInput
+            label="Descripción detallada"
+            value={incidentForm.description}
+            onChange={(e) => setIncidentForm({ ...incidentForm, description: e.target.value })}
+            placeholder="Qué pasó, dónde, daños visibles..."
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <FormSelect
+              label="Gravedad"
+              value={incidentForm.severity}
+              onChange={(e) => setIncidentForm({ ...incidentForm, severity: e.target.value })}
+              options={Object.entries(INCIDENT_SEVERITY_LABELS).map(([value, label]) => ({
+                value,
+                label
+              }))}
+            />
+            <FormSelect
+              label="Estado"
+              value={incidentForm.status}
+              onChange={(e) => setIncidentForm({ ...incidentForm, status: e.target.value })}
+              options={Object.entries(INCIDENT_STATUS_LABELS).map(([value, label]) => ({
+                value,
+                label
+              }))}
+            />
+          </div>
+          <FormInput
+            label="Km al momento del incidente (opcional)"
+            type="number"
+            value={incidentForm.mileage}
+            onChange={(e) => setIncidentForm({ ...incidentForm, mileage: e.target.value })}
+          />
+          {(incidentForm.status === 'resolved' || incidentForm.status === 'in_review') && (
+            <FormInput
+              label="Seguimiento / resolución"
+              value={incidentForm.resolution_notes}
+              onChange={(e) =>
+                setIncidentForm({ ...incidentForm, resolution_notes: e.target.value })
+              }
+              placeholder="Reparación, taller, pendientes..."
+            />
+          )}
+          <div className="flex justify-between gap-3 border-t pt-4">
+            <div>
+              {editingIncident && (
+                <Button variant="secondary" type="button" onClick={handleDeleteIncident}>
+                  Eliminar
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setIsIncidentModalOpen(false);
+                  setEditingIncident(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button variant="primary" type="submit">
+                {editingIncident ? 'Actualizar' : 'Guardar reporte'}
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>

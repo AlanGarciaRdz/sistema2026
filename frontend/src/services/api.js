@@ -91,6 +91,12 @@ export const deleteDriverPortalExpense = (contractNumber, expenseId) =>
     `/driver-portal/${encodeURIComponent(contractNumber)}/expenses/${expenseId}`
   );
 
+// Portal público reportes de unidad (chofer, sin login)
+export const getVehicleReportPortal = (vehicleKey) =>
+  api.get(`/vehicle-report-portal/${encodeURIComponent(vehicleKey)}`);
+export const postVehicleReportPortal = (vehicleKey, data) =>
+  api.post(`/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/reports`, data);
+
 // Maintenance
 export const getMaintenance = () => api.get('/maintenance');
 export const getMaintenanceById = (id) => api.get(`/maintenance/${id}`);
@@ -104,6 +110,10 @@ export const updateVehicleMileage = (vehicleId, data) =>
 export const createServiceItem = (data) => api.post('/maintenance/service-items', data);
 export const updateServiceItem = (id, data) => api.put(`/maintenance/service-items/${id}`, data);
 export const deleteServiceItem = (id) => api.delete(`/maintenance/service-items/${id}`);
+export const getIncidentReports = () => api.get('/maintenance/incident-reports');
+export const createIncidentReport = (data) => api.post('/maintenance/incident-reports', data);
+export const updateIncidentReport = (id, data) => api.put(`/maintenance/incident-reports/${id}`, data);
+export const deleteIncidentReport = (id) => api.delete(`/maintenance/incident-reports/${id}`);
 
 // Assignments
 export const getAssignments = () => api.get('/assignments');

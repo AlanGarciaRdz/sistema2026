@@ -13,13 +13,11 @@ const {
   updateVehicleMileage,
   createServiceItem,
   updateServiceItem,
-  deleteServiceItem,
-  ensureDieselAdblue
+  deleteServiceItem
 } = require('../controllers/fleetMaintenanceController');
 
 router.get('/fleet', getFleetOverview);
 router.patch('/vehicles/:vehicleId/mileage', updateVehicleMileage);
-router.post('/vehicles/:vehicleId/adblue', ensureDieselAdblue);
 router.post('/service-items', createServiceItem);
 router.put('/service-items/:id', updateServiceItem);
 router.delete('/service-items/:id', deleteServiceItem);

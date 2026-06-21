@@ -2,8 +2,7 @@ const pool = require('../config/db');
 const {
   computeKmServiceStatus,
   computeIntervalProgress,
-  resolveEffectiveMileage,
-  isDieselFuel
+  resolveEffectiveMileage
 } = require('../utils/maintenanceStatus');
 
 async function bumpVehicleMileageIfHigher(vehicleId, km, dateStr) {
@@ -18,6 +17,86 @@ async function bumpVehicleMileageIfHigher(vehicleId, km, dateStr) {
      WHERE id = $3 AND (current_mileage IS NULL OR current_mileage < $1)`,
     [n, d, vehicleId]
   );
+}
+
+function normalizeServiceDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
+function parseServiceKm(value) {
+  if (value == null || value === '') return null;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lastServiceEventChanged(prev, next) {
+  const prevKm = parseServiceKm(prev.last_service_km);
+  const nextKm = parseServiceKm(next.last_service_km);
+  const prevDate = normalizeServiceDate(prev.last_service_date);
+  const nextDate = normalizeServiceDate(next.last_service_date);
+  return prevKm !== nextKm || prevDate !== nextDate;
+}
+
+function hasLastServiceEvent(km, dateStr) {
+  return parseServiceKm(km) != null || normalizeServiceDate(dateStr) != null;
+}
+
+async function logServiceItemToMaintenanceHistory({
+  vehicleId,
+  serviceItemId,
+  title,
+  lastServiceKm,
+  lastServiceDate,
+  nextDueKm,
+  intervalKm,
+  notes
+}) {
+  if (!vehicleId || !serviceItemId) return false;
+  const km = parseServiceKm(lastServiceKm);
+  const dateStr = normalizeServiceDate(lastServiceDate) || new Date().toISOString().slice(0, 10);
+  if (km == null && !normalizeServiceDate(lastServiceDate)) return false;
+
+  const userNotes = notes && String(notes).trim();
+  const historyNotes = userNotes || 'Registrado desde servicio programado';
+
+  await pool.query(
+    `INSERT INTO vehicle_maintenance (
+      vehicle_id, maintenance_date, mileage, maintenance_type,
+      notes, next_service_km, interval_km, service_item_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      vehicleId,
+      dateStr,
+      km,
+      title,
+      historyNotes,
+      parseServiceKm(nextDueKm),
+      parseServiceKm(intervalKm),
+      serviceItemId
+    ]
+  );
+  return true;
+}
+
+async function logOdometerReadingToHistory(vehicleId, km, dateStr) {
+  const mileage = parseServiceKm(km);
+  const recordedAt = normalizeServiceDate(dateStr) || new Date().toISOString().slice(0, 10);
+  if (!vehicleId || mileage == null) return false;
+
+  await pool.query(
+    `INSERT INTO vehicle_maintenance (
+      vehicle_id, maintenance_date, mileage, maintenance_type, notes
+    ) VALUES ($1, $2, $3, $4, $5)`,
+    [
+      vehicleId,
+      recordedAt,
+      mileage,
+      'Lectura odómetro',
+      'Lectura al guardar km actual de la unidad'
+    ]
+  );
+  return true;
 }
 
 const mapServiceItemRow = (row, effectiveKm) => {
@@ -120,7 +199,6 @@ const getFleetOverview = async (req, res) => {
         effective_mileage: mileage.effectiveKm,
         mileage_stale: mileage.mileageStale,
         mileage_source: mileage.mileageSource,
-        is_diesel: isDieselFuel(v.fuel_type),
         service_items: serviceItems,
         fleet_status: serviceItems.length ? worst : 'unknown',
         recent_maintenance: recent
@@ -147,6 +225,17 @@ const updateVehicleMileage = async (req, res) => {
         ? String(current_mileage_at).slice(0, 10)
         : new Date().toISOString().slice(0, 10);
 
+    const prevRes = await pool.query(
+      'SELECT current_mileage, current_mileage_at FROM vehicles WHERE id = $1',
+      [vehicleId]
+    );
+    if (!prevRes.rows.length) {
+      return res.status(404).json({ success: false, error: 'Vehículo no encontrado' });
+    }
+    const prev = prevRes.rows[0];
+    const prevKm = parseServiceKm(prev.current_mileage);
+    const prevDate = normalizeServiceDate(prev.current_mileage_at);
+
     const result = await pool.query(
       `UPDATE vehicles SET
          current_mileage = $1,
@@ -156,10 +245,16 @@ const updateVehicleMileage = async (req, res) => {
        RETURNING *`,
       [km, km != null ? dateVal : null, vehicleId]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Vehículo no encontrado' });
+
+    let historyLogged = false;
+    if (
+      km != null &&
+      (prevKm !== km || prevDate !== dateVal)
+    ) {
+      historyLogged = await logOdometerReadingToHistory(vehicleId, km, dateVal);
     }
-    res.json({ success: true, data: result.rows[0] });
+
+    res.json({ success: true, data: result.rows[0], history_logged: historyLogged });
   } catch (error) {
     console.error('Error updating vehicle mileage:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -204,7 +299,20 @@ const createServiceItem = async (req, res) => {
     if (last_service_km) {
       await bumpVehicleMileageIfHigher(vehicle_id, last_service_km, last_service_date);
     }
-    res.status(201).json({ success: true, data: row });
+    let historyLogged = false;
+    if (hasLastServiceEvent(last_service_km, last_service_date)) {
+      historyLogged = await logServiceItemToMaintenanceHistory({
+        vehicleId: vehicle_id,
+        serviceItemId: row.id,
+        title: row.title,
+        lastServiceKm: last_service_km,
+        lastServiceDate: last_service_date,
+        nextDueKm: row.next_due_km,
+        intervalKm: row.interval_km,
+        notes
+      });
+    }
+    res.status(201).json({ success: true, data: row, history_logged: historyLogged });
   } catch (error) {
     console.error('Error creating service item:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -214,6 +322,12 @@ const createServiceItem = async (req, res) => {
 const updateServiceItem = async (req, res) => {
   try {
     const { id } = req.params;
+    const prevRes = await pool.query('SELECT * FROM vehicle_service_items WHERE id = $1', [id]);
+    if (!prevRes.rows.length) {
+      return res.status(404).json({ success: false, error: 'Servicio no encontrado' });
+    }
+    const prev = prevRes.rows[0];
+
     const {
       title,
       item_kind,
@@ -263,7 +377,29 @@ const updateServiceItem = async (req, res) => {
     if (last_service_km) {
       await bumpVehicleMileageIfHigher(row.vehicle_id, last_service_km, last_service_date);
     }
-    res.json({ success: true, data: row });
+
+    const nextSnapshot = {
+      last_service_km: last_service_km ?? null,
+      last_service_date: last_service_date || null
+    };
+    let historyLogged = false;
+    if (
+      lastServiceEventChanged(prev, nextSnapshot) &&
+      hasLastServiceEvent(last_service_km, last_service_date)
+    ) {
+      historyLogged = await logServiceItemToMaintenanceHistory({
+        vehicleId: row.vehicle_id,
+        serviceItemId: row.id,
+        title: row.title,
+        lastServiceKm: last_service_km,
+        lastServiceDate: last_service_date,
+        nextDueKm: row.next_due_km,
+        intervalKm: row.interval_km,
+        notes
+      });
+    }
+
+    res.json({ success: true, data: row, history_logged: historyLogged });
   } catch (error) {
     console.error('Error updating service item:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -287,55 +423,11 @@ const deleteServiceItem = async (req, res) => {
   }
 };
 
-const ensureDieselAdblue = async (req, res) => {
-  try {
-    const { vehicleId } = req.params;
-    const vRes = await pool.query('SELECT * FROM vehicles WHERE id = $1', [vehicleId]);
-    if (!vRes.rows.length) {
-      return res.status(404).json({ success: false, error: 'Vehículo no encontrado' });
-    }
-    const v = vRes.rows[0];
-    if (!isDieselFuel(v.fuel_type)) {
-      return res.status(400).json({ success: false, error: 'La unidad no es diésel' });
-    }
-    const existing = await pool.query(
-      `SELECT id FROM vehicle_service_items
-       WHERE vehicle_id = $1 AND item_kind = 'adblue' AND is_active = TRUE`,
-      [vehicleId]
-    );
-    if (existing.rows.length) {
-      return res.json({ success: true, data: existing.rows[0], created: false });
-    }
-    const km = v.current_mileage;
-    const nextDue = Number.isFinite(km) ? km + 2500 : null;
-    const ins = await pool.query(
-      `INSERT INTO vehicle_service_items (
-        vehicle_id, title, item_kind, next_due_km, warn_before_km, critical_before_km,
-        interval_km, last_service_km, last_service_date, notes
-      ) VALUES ($1, $2, 'adblue', $3, 800, 500, 2500, $4, $5, $6)
-      RETURNING *`,
-      [
-        vehicleId,
-        'AdBlue (urea)',
-        nextDue,
-        km,
-        v.current_mileage_at || new Date().toISOString().slice(0, 10),
-        'Alerta cada ~2,500 km desde última carga. Actualizar al cargar AdBlue.'
-      ]
-    );
-    res.status(201).json({ success: true, data: ins.rows[0], created: true });
-  } catch (error) {
-    console.error('Error ensuring AdBlue item:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
 module.exports = {
   getFleetOverview,
   updateVehicleMileage,
   createServiceItem,
   updateServiceItem,
   deleteServiceItem,
-  ensureDieselAdblue,
   mapServiceItemRow
 };

@@ -74,15 +74,8 @@ function computeKmServiceStatus(currentKm, nextDueKm, warnBeforeKm = 5000, criti
   return { status, kmRemaining: remaining, percentUsed };
 }
 
-function isDieselFuel(fuelType) {
-  return String(fuelType || '')
-    .toLowerCase()
-    .includes('diesel');
-}
-
 module.exports = {
   resolveEffectiveMileage,
   computeIntervalProgress,
   computeKmServiceStatus,
-  isDieselFuel
 };

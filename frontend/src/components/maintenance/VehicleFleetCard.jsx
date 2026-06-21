@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ServiceStatusBar from './ServiceStatusBar';
 import Button from '../Button';
 import { STATUS_STYLES, STATUS_LABELS, formatKm } from '../../utils/maintenanceStatus';
@@ -9,12 +9,25 @@ const VehicleFleetCard = ({
   onAddServiceItem,
   onEditServiceItem,
   onRegisterMaintenance,
-  onEnsureAdblue,
   savingMileage
 }) => {
   const [kmInput, setKmInput] = useState(
     vehicle.current_mileage != null ? String(vehicle.current_mileage) : ''
   );
+  const [kmDate, setKmDate] = useState(
+    vehicle.current_mileage_at
+      ? String(vehicle.current_mileage_at).slice(0, 10)
+      : new Date().toISOString().slice(0, 10)
+  );
+
+  useEffect(() => {
+    setKmInput(vehicle.current_mileage != null ? String(vehicle.current_mileage) : '');
+    setKmDate(
+      vehicle.current_mileage_at
+        ? String(vehicle.current_mileage_at).slice(0, 10)
+        : new Date().toISOString().slice(0, 10)
+    );
+  }, [vehicle.id, vehicle.current_mileage, vehicle.current_mileage_at]);
 
   const fleetStyle = STATUS_STYLES[vehicle.fleet_status] || STATUS_STYLES.unknown;
   const label =
@@ -26,7 +39,7 @@ const VehicleFleetCard = ({
   const handleSaveKm = () => {
     const km = kmInput.trim() === '' ? null : parseInt(kmInput, 10);
     if (km != null && (!Number.isFinite(km) || km < 0)) return;
-    onSaveMileage(vehicle.id, km);
+    onSaveMileage(vehicle.id, km, kmDate);
   };
 
   return (
@@ -37,11 +50,6 @@ const VehicleFleetCard = ({
           <p className="text-sm text-gray-500">
             {vehicle.license_plate && <span className="mr-2">{vehicle.license_plate}</span>}
             {vehicle.brand} {vehicle.model}
-            {vehicle.is_diesel && (
-              <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-xs font-medium text-slate-700">
-                Diésel
-              </span>
-            )}
           </p>
         </div>
         <span className={`rounded-full px-2 py-1 text-xs font-medium ${fleetStyle.badge}`}>
@@ -58,9 +66,9 @@ const VehicleFleetCard = ({
       )}
 
       <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-3">
-        <div className="min-w-[140px] flex-1">
+        <div className="min-w-[120px] flex-1">
           <label className="mb-1 block text-xs font-medium text-gray-600">
-            Km actual (odómetro hoy)
+            Km actual (odómetro)
           </label>
           <input
             type="number"
@@ -69,15 +77,23 @@ const VehicleFleetCard = ({
             value={kmInput}
             onChange={(e) => setKmInput(e.target.value)}
           />
-          {vehicle.current_mileage_at && (
-            <p className="mt-0.5 text-xs text-gray-400">
-              Actualizado: {new Date(vehicle.current_mileage_at).toLocaleDateString('es-MX')}
-            </p>
-          )}
+        </div>
+        <div className="min-w-[130px]">
+          <label className="mb-1 block text-xs font-medium text-gray-600">Fecha de lectura</label>
+          <input
+            type="date"
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            value={kmDate}
+            onChange={(e) => setKmDate(e.target.value)}
+          />
         </div>
         <Button variant="secondary" onClick={handleSaveKm} disabled={savingMileage}>
           Guardar km
         </Button>
+        <p className="w-full text-[11px] text-gray-500">
+          Cada guardado con km o fecha distinta queda en la pestaña <strong>Historial</strong> como
+          &quot;Lectura odómetro&quot; (ej. km del 1 de junio).
+        </p>
       </div>
 
       <div className="mb-2 flex flex-wrap gap-2">
@@ -87,11 +103,6 @@ const VehicleFleetCard = ({
         <Button variant="primary" className="text-xs" onClick={() => onRegisterMaintenance(vehicle)}>
           Registrar servicio
         </Button>
-        {vehicle.is_diesel && (
-          <Button variant="secondary" className="text-xs" onClick={() => onEnsureAdblue(vehicle)}>
-            AdBlue
-          </Button>
-        )}
       </div>
 
       <div className="space-y-2">
@@ -110,7 +121,7 @@ const VehicleFleetCard = ({
           ))
         ) : (
           <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-sm text-gray-500">
-            Sin servicios programados. Agrega cambio de aceite, frenos o AdBlue.
+            Sin servicios programados. Agrega cambio de aceite, frenos u otro servicio.
           </p>
         )}
       </div>

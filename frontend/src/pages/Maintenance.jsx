@@ -9,7 +9,6 @@ import {
   createServiceItem,
   updateServiceItem,
   deleteServiceItem,
-  ensureVehicleAdblue,
   getVehicles,
   getPaymentAccounts
 } from '../services/api';
@@ -71,6 +70,8 @@ const Maintenance = () => {
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyMaintenanceForm());
   const [serviceForm, setServiceForm] = useState(emptyServiceItemForm());
+  const [historyVehicleFilter, setHistoryVehicleFilter] = useState('');
+  const [historyUnitSearch, setHistoryUnitSearch] = useState('');
 
   const fetchFleet = useCallback(async () => {
     try {
@@ -112,15 +113,20 @@ const Maintenance = () => {
     fetchMaintenance();
   };
 
-  const handleSaveMileage = async (vehicleId, km) => {
+  const handleSaveMileage = async (vehicleId, km, kmDate) => {
     try {
       setSavingMileageId(vehicleId);
-      await updateVehicleMileage(vehicleId, {
+      const res = await updateVehicleMileage(vehicleId, {
         current_mileage: km,
-        current_mileage_at: new Date().toISOString().split('T')[0]
+        current_mileage_at: kmDate || new Date().toISOString().split('T')[0]
       });
-      setToast({ message: 'Kilometraje actualizado', type: 'success' });
-      fetchFleet();
+      setToast({
+        message: res.data.history_logged
+          ? 'Kilometraje guardado y registrado en historial'
+          : 'Kilometraje actualizado',
+        type: 'success'
+      });
+      refreshAll();
     } catch {
       setToast({ message: 'Error al guardar kilometraje', type: 'error' });
     } finally {
@@ -206,15 +212,25 @@ const Maintenance = () => {
         notes: serviceForm.notes || null
       };
       if (editingServiceItem) {
-        await updateServiceItem(editingServiceItem.id, payload);
-        setToast({ message: 'Servicio programado actualizado', type: 'success' });
+        const res = await updateServiceItem(editingServiceItem.id, payload);
+        setToast({
+          message: res.data.history_logged
+            ? 'Servicio actualizado y registrado en historial'
+            : 'Servicio programado actualizado',
+          type: 'success'
+        });
       } else {
-        await createServiceItem(payload);
-        setToast({ message: 'Servicio programado agregado', type: 'success' });
+        const res = await createServiceItem(payload);
+        setToast({
+          message: res.data.history_logged
+            ? 'Servicio agregado y registrado en historial'
+            : 'Servicio programado agregado',
+          type: 'success'
+        });
       }
       setIsServiceModalOpen(false);
       setEditingServiceItem(null);
-      fetchFleet();
+      refreshAll();
     } catch {
       setToast({ message: 'Error al guardar servicio programado', type: 'error' });
     }
@@ -230,19 +246,6 @@ const Maintenance = () => {
       fetchFleet();
     } catch {
       setToast({ message: 'Error al eliminar', type: 'error' });
-    }
-  };
-
-  const handleEnsureAdblue = async (vehicle) => {
-    try {
-      const res = await ensureVehicleAdblue(vehicle.id);
-      setToast({
-        message: res.data.created ? 'Seguimiento AdBlue creado' : 'AdBlue ya estaba configurado',
-        type: 'success'
-      });
-      fetchFleet();
-    } catch {
-      setToast({ message: 'No se pudo configurar AdBlue', type: 'error' });
     }
   };
 
@@ -391,6 +394,20 @@ const Maintenance = () => {
     return (rank[b.fleet_status] || 0) - (rank[a.fleet_status] || 0);
   });
 
+  const filteredMaintenance = maintenance.filter((row) => {
+    if (historyVehicleFilter && String(row.vehicle_id) !== String(historyVehicleFilter)) {
+      return false;
+    }
+    const q = historyUnitSearch.trim().toLowerCase();
+    if (!q) return true;
+    const label = getVehicleLabel(row).toLowerCase();
+    const plate = String(row.license_plate || '').toLowerCase();
+    const code = String(row.vehicle_code || '').toLowerCase();
+    return label.includes(q) || plate.includes(q) || code.includes(q);
+  });
+
+  const historyFilterActive = historyVehicleFilter || historyUnitSearch.trim();
+
   if (loadingFleet && loadingHistory && !fleet.length) return <Loading />;
 
   return (
@@ -410,7 +427,7 @@ const Maintenance = () => {
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         Las alertas comparan el <strong>km actual de la unidad</strong> contra el <strong>próximo
         servicio</strong> de cada ítem. Captura el odómetro de hoy arriba en cada tarjeta (ej. 165,601).
-        El próximo km debe ser último servicio + intervalo (AdBlue: 165,601 + 2,500 = 168,101). Amarillo
+        El próximo km debe ser último servicio + intervalo (ej. 155,601 + 10,000 = 165,601). Amarillo
         y rojo según los km que configures antes del vencimiento.
       </p>
 
@@ -446,7 +463,6 @@ const Maintenance = () => {
                   onAddServiceItem={openServiceItemModal}
                   onEditServiceItem={openServiceItemModal}
                   onRegisterMaintenance={openMaintenanceModal}
-                  onEnsureAdblue={handleEnsureAdblue}
                 />
               ))}
             </div>
@@ -459,16 +475,72 @@ const Maintenance = () => {
 
       {tab === 'history' && (
         <>
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:p-4">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+              Filtrar historial
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="min-w-0">
+                <label className="mb-1 block text-xs font-medium text-gray-600">Unidad</label>
+                <select
+                  value={historyVehicleFilter}
+                  onChange={(e) => setHistoryVehicleFilter(e.target.value)}
+                  className="w-full min-h-[44px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                >
+                  <option value="">Todas las unidades</option>
+                  {vehicleOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-xs font-medium text-gray-600">
+                  Buscar unidad
+                </label>
+                <input
+                  type="text"
+                  placeholder="Código, placas, modelo..."
+                  value={historyUnitSearch}
+                  onChange={(e) => setHistoryUnitSearch(e.target.value)}
+                  className="w-full min-h-[44px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                {historyFilterActive && (
+                  <Button
+                    variant="secondary"
+                    className="min-h-[44px]"
+                    onClick={() => {
+                      setHistoryVehicleFilter('');
+                      setHistoryUnitSearch('');
+                    }}
+                  >
+                    Limpiar
+                  </Button>
+                )}
+                <p className="pb-2 text-sm text-gray-500">
+                  {filteredMaintenance.length} de {maintenance.length} registros
+                </p>
+              </div>
+            </div>
+          </div>
           {loadingHistory ? (
             <Loading />
           ) : (
             <Table
               columns={columns}
-              data={maintenance}
+              data={filteredMaintenance}
               onEdit={handleEdit}
               onDelete={handleDelete}
               sortable
             />
+          )}
+          {!loadingHistory && maintenance.length > 0 && filteredMaintenance.length === 0 && (
+            <p className="mt-4 text-center text-sm text-gray-500">
+              No hay registros con ese filtro.
+            </p>
           )}
         </>
       )}
@@ -490,7 +562,6 @@ const Maintenance = () => {
             options={[
               { value: 'oil', label: 'Cambio de aceite' },
               { value: 'brakes', label: 'Frenos' },
-              { value: 'adblue', label: 'AdBlue' },
               { value: 'tires', label: 'Llantas' },
               { value: 'custom', label: 'Otro' }
             ]}
@@ -507,12 +578,16 @@ const Maintenance = () => {
             value={serviceForm.last_service_km}
             onChange={(e) => patchServiceForm({ last_service_km: e.target.value })}
           />
+          <p className="text-xs text-gray-500 -mt-2">
+            Al cambiar el km o la fecha del último servicio y guardar, se agrega una entrada en la
+            pestaña <strong>Historial</strong> para análisis futuro (cargas de AdBlue, aceite, etc.).
+          </p>
           <FormInput
             label="Intervalo después del servicio (km)"
             type="number"
             value={serviceForm.interval_km}
             onChange={(e) => patchServiceForm({ interval_km: e.target.value })}
-            placeholder="Ej. 10000 aceite, 2500 AdBlue, 30000 frenos"
+            placeholder="Ej. 10000 aceite, 30000 frenos"
           />
           <FormInput
             label="Próximo servicio (km) = último + intervalo"

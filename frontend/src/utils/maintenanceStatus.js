@@ -67,7 +67,6 @@ export function alertProgress(kmRemaining, warnBeforeKm = 5000, criticalBeforeKm
 export const ITEM_KIND_PRESETS = {
   oil: { title: 'Cambio de aceite', interval_km: 10000, warn_before_km: 5000, critical_before_km: 2000 },
   brakes: { title: 'Frenos (balatas/discos)', interval_km: 30000, warn_before_km: 5000, critical_before_km: 2000 },
-  adblue: { title: 'AdBlue (urea)', interval_km: 2500, warn_before_km: 800, critical_before_km: 500 },
   tires: { title: 'Llantas', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
   custom: { title: '', interval_km: null, warn_before_km: 5000, critical_before_km: 2000 }
 };

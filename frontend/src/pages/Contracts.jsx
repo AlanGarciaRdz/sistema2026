@@ -204,7 +204,8 @@ const Contracts = () => {
         in_progress: 'En proceso',
         complete: 'Realizado',
         pending_collect: 'Por cobrar',
-        pending_pay: 'Por pagar'
+        pending_pay: 'Por pagar',
+        cancelled: 'Cancelado'
       };
 
       const isContrato = payload.mode === 'contrato';
@@ -330,7 +331,8 @@ const Contracts = () => {
       'En proceso': 'in_progress',
       Realizado: 'complete',
       'Por cobrar': 'pending_collect',
-      'Por pagar': 'pending_pay'
+      'Por pagar': 'pending_pay',
+      Cancelado: 'cancelled'
     };
 
     const mode = notesData.mode || 'contrato';
@@ -387,7 +389,8 @@ const Contracts = () => {
       'En proceso': 'in_progress',
       Realizado: 'complete',
       'Por cobrar': 'pending_collect',
-      'Por pagar': 'pending_pay'
+      'Por pagar': 'pending_pay',
+      Cancelado: 'cancelled'
     };
 
     const mode = notesData.mode || 'contrato';
@@ -887,7 +890,8 @@ const Contracts = () => {
           row.status === 'Por cobrar' ? 'bg-amber-100 text-amber-900' :
           row.status === 'Por pagar' ? 'bg-orange-100 text-orange-900' :
           row.status === 'En proceso' ? 'bg-yellow-100 text-yellow-900' :
-          'bg-red-100 text-red-800'
+          row.status === 'Cancelado' ? 'bg-red-100 text-red-800' :
+          'bg-gray-100 text-gray-800'
         }`}>
           {row.status}
         </span>
@@ -965,6 +969,7 @@ const Contracts = () => {
               <option value="Realizado">Realizado</option>
               <option value="Por cobrar">Por cobrar</option>
               <option value="Por pagar">Por pagar</option>
+              <option value="Cancelado">Cancelado</option>
             </select>
           </div>
           <div className="min-w-0">

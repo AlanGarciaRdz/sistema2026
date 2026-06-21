@@ -740,6 +740,7 @@ const ContractService = ({
                 <option value="complete">Completado</option>
                 <option value="pending_collect">Por cobrar</option>
                 <option value="pending_pay">Por pagar</option>
+                <option value="cancelled">Cancelado</option>
               </select>
             </div>
 

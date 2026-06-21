@@ -104,7 +104,6 @@ export const updateVehicleMileage = (vehicleId, data) =>
 export const createServiceItem = (data) => api.post('/maintenance/service-items', data);
 export const updateServiceItem = (id, data) => api.put(`/maintenance/service-items/${id}`, data);
 export const deleteServiceItem = (id) => api.delete(`/maintenance/service-items/${id}`);
-export const ensureVehicleAdblue = (vehicleId) => api.post(`/maintenance/vehicles/${vehicleId}/adblue`);
 
 // Assignments
 export const getAssignments = () => api.get('/assignments');

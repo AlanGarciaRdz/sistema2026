@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, Copy, Save } from 'lucide-react';
+import { X, Copy, Save, FileDown } from 'lucide-react';
 import Button from './Button';
 import FormInput from './FormInput';
 import FormSelect from './FormSelect';
 import { getClients } from '../services/api';
 import { diffInclusiveCalendarDays } from '../utils/formatDateLocal';
+import { buildQuotePdfInfo, generateQuotePdf } from '../utils/quotePdfUtils';
 
 /** arma `days` legacy para cotizaciones / API cuando solo hay trip simple */
 function buildLegacyDays(trip) {
@@ -534,6 +535,35 @@ ${d}`;
     alert('¡Copiado al portapapeles!');
   };
 
+  const handleGenerateQuotePdf = () => {
+    if (!results?.quotations?.length) {
+      alert('Calcula la cotización y elige una unidad antes de generar el PDF.');
+      return;
+    }
+    const sel = results.quotations.find((q) => q.quoteKey === selectedVehicleKey);
+    if (!sel) {
+      alert('Elige una unidad en los resultados.');
+      return;
+    }
+    if (!trip.origin?.trim() || !trip.destination?.trim()) {
+      alert('Indica origen y destino.');
+      return;
+    }
+    try {
+      const info = buildQuotePdfInfo({
+        clientName,
+        trip,
+        selectedQuote: sel,
+        agreedAmount,
+        editingQuote
+      });
+      generateQuotePdf(info);
+    } catch (err) {
+      console.error(err);
+      alert('Error al generar el PDF.');
+    }
+  };
+
   const handleSave = () => {
     if (!(getKmOneWayEffective() > 0)) {
       alert('Indica la distancia (km ida) antes de guardar.');
@@ -607,9 +637,20 @@ ${d}`;
         <div className="relative bg-white shadow-xl w-full max-w-[1200px] min-h-[100dvh] sm:min-h-0 sm:max-h-[95vh] sm:rounded-lg sm:border border-gray-200 flex flex-col">
           <div className="sticky top-0 z-20 bg-white border-b px-4 py-3 flex items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-gray-900">Calculadora de cotización</h2>
-            <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2">
-              <X size={24} />
-            </button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleGenerateQuotePdf}
+                className="hidden sm:inline-flex"
+              >
+                <FileDown size={18} className="mr-2" />
+                PDF cotización
+              </Button>
+              <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2">
+                <X size={24} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 max-w-none">
@@ -1070,6 +1111,9 @@ ${d}`;
                 </div>
 
                 <div className="flex flex-wrap gap-3">
+                  <Button type="button" variant="secondary" onClick={handleGenerateQuotePdf}>
+                    <FileDown size={18} className="mr-2" /> PDF cotización
+                  </Button>
                   <Button type="button" variant="success" onClick={() => copyToClipboard(generateClientWhatsApp())}>
                     <Copy size={18} className="mr-2" /> WhatsApp cliente
                   </Button>

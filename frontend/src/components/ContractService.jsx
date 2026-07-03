@@ -82,6 +82,8 @@ const ContractService = ({
     const [departureTime, setDepartureTime] = useState('');
     const [returnDate,    setReturnDate]    = useState('');
     const [returnTime,    setReturnTime]    = useState('');
+    /** dual = salida + regreso; blocked = un solo evento que bloquea la unidad todo el viaje */
+    const [calendarEventMode, setCalendarEventMode] = useState('dual');
     const [capacity,      setCapacity]      = useState('');
 
     // ── servicio-only ──
@@ -149,6 +151,7 @@ const ContractService = ({
             setDepartureTime(editingContract.departureTime || '');
             setReturnDate(editingContract.returnDate || '');
             setReturnTime(editingContract.returnTime || '');
+            setCalendarEventMode(editingContract.calendarEventMode || 'dual');
             setCapacity(editingContract.capacity || '');
             setServiceDate(editingContract.serviceDate || '');
             setServiceTime(editingContract.serviceTime || '');
@@ -249,6 +252,7 @@ const ContractService = ({
         setDepartureTime('');
         setReturnDate('');
         setReturnTime('');
+        setCalendarEventMode('dual');
         setCapacity('');
         setServiceDate('');
         setServiceTime('');
@@ -363,6 +367,7 @@ const ContractService = ({
             departureTime,
             returnDate,
             returnTime,
+            calendarEventMode,
             capacity: parseInt(capacity) || null,
             assignment
           }
@@ -645,6 +650,46 @@ const ContractService = ({
                     onChange={e => setReturnTime(e.target.value)}
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
                   />
+                </div>
+
+                <div className="col-span-2 flex flex-col gap-2 rounded-lg border border-sky-100 bg-sky-50/60 p-3">
+                  <span className="text-xs font-medium text-gray-700">
+                    Google Calendar (al sincronizar)
+                  </span>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:gap-4">
+                    <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="calendarEventMode"
+                        value="dual"
+                        checked={calendarEventMode === 'dual'}
+                        onChange={() => setCalendarEventMode('dual')}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Dos eventos (salida y regreso)
+                        <span className="block text-xs text-gray-500">
+                          Un evento el día de salida y otro el día de regreso
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="calendarEventMode"
+                        value="blocked"
+                        checked={calendarEventMode === 'blocked'}
+                        onChange={() => setCalendarEventMode('blocked')}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Un evento (unidad bloqueada)
+                        <span className="block text-xs text-gray-500">
+                          Bloquea del inicio al fin del viaje (ej. GDL–Veracruz sin regreso)
+                        </span>
+                      </span>
+                    </label>
+                  </div>
                 </div>
               </>
             ) : (

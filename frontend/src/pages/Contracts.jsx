@@ -241,6 +241,7 @@ const Contracts = () => {
         departureTime: payload.departureTime || '',
         returnTime: payload.returnTime || '',
         serviceTime: payload.serviceTime || '',
+        calendarEventMode: payload.calendarEventMode || 'dual',
         vehicle: payload.vehicle || null,
         uiNotes: payload.notes || ''
       };
@@ -367,6 +368,7 @@ const Contracts = () => {
       returnDate: mode === 'contrato' ? endDateStr : '',
       departureTime: notesData.departureTime || '',
       returnTime: notesData.returnTime || '',
+      calendarEventMode: notesData.calendarEventMode || 'dual',
       capacity: row.passenger_count || '',
       serviceDate: mode === 'servicio' ? startDateStr : '',
       serviceTime: mode === 'servicio' ? (notesData.serviceTime || '') : ''
@@ -425,6 +427,7 @@ const Contracts = () => {
       returnDate: mode === 'contrato' ? endDateStr : '',
       departureTime: notesData.departureTime || '',
       returnTime: notesData.returnTime || '',
+      calendarEventMode: notesData.calendarEventMode || 'dual',
       capacity: row.passenger_count || '',
       serviceDate: mode === 'servicio' ? startDateStr : '',
       serviceTime: mode === 'servicio' ? (notesData.serviceTime || '') : ''
@@ -1054,14 +1057,14 @@ const Contracts = () => {
               onClick={() => handleSyncCalendar(row)}
               disabled={syncingCalendarId === row.id}
               className={`transition-colors p-1 disabled:opacity-50 ${
-                row.calendar_event_id
+                row.calendar_event_id || row.calendar_return_event_id
                   ? 'text-sky-700 hover:text-sky-900'
                   : 'text-sky-600 hover:text-sky-800'
               }`}
               title={
-                row.calendar_event_id
-                  ? 'Actualizar evento en Google Calendar'
-                  : 'Crear evento en Google Calendar'
+                row.calendar_event_id || row.calendar_return_event_id
+                  ? 'Actualizar evento(s) en Google Calendar (salida y regreso si aplica)'
+                  : 'Crear evento(s) en Google Calendar (2 eventos si el viaje es de varios días)'
               }
             >
               <Calendar size={18} aria-hidden />

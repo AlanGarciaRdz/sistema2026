@@ -7,7 +7,13 @@ import Loading from '../components/Loading';
 import Toast from '../components/Toast';
 import QuoteCalculator from '../components/QuoteCalculator';
 import Button from '../components/Button';
-import { Copy } from 'lucide-react';
+import { Copy, CopyPlus, FileDown } from 'lucide-react';
+import { buildQuotePdfInfo, generateQuotePdf } from '../utils/quotePdfUtils';
+import {
+  serviceItemDisplayLabel,
+  parseServiceItemAmount,
+  sumServiceItems
+} from '../utils/quoteServiceUtils';
 
 const Quotes = () => {
   const [quotes, setQuotes] = useState([]);
@@ -46,16 +52,124 @@ const Quotes = () => {
 
   const handleEditQuote = (quote) => {
     const quoteData = parseQuoteData(quote.notes);
-    
-    // Prepare data for QuoteCalculator
+
     setEditingQuoteData({
       id: quote.id,
-      ...quoteData
+      ...quoteData,
+      client_name: quote.client_name || quoteData.client_name || quoteData.clientName,
+      client_id: quote.client_id ?? quoteData.client_id
     });
-    
-    // Close view modal and open calculator
+
     setViewingQuote(null);
     setIsCalculatorOpen(true);
+  };
+
+  const handleCopySimilar = (quote) => {
+    const quoteData = parseQuoteData(quote.notes);
+
+    setEditingQuoteData({
+      ...quoteData,
+      id: null,
+      client_name: quote.client_name || quoteData.client_name || quoteData.clientName,
+      client_id: quote.client_id ?? quoteData.client_id,
+      agreedAmount:
+        quoteData.agreedAmount ||
+        (quote.total_amount != null ? String(quote.total_amount) : '')
+    });
+
+    setViewingQuote(null);
+    setIsCalculatorOpen(true);
+    setToast({
+      message: 'Cotización similar cargada — ajusta lo necesario y guarda como nueva',
+      type: 'success'
+    });
+  };
+
+  const handleCopyQuoteMessage = (quote) => {
+    const quoteData = parseQuoteData(quote.notes);
+    const text = quoteData.whatsappClient || quoteData.whatsapp_client;
+
+    if (text) {
+      copyToClipboard(text);
+      return;
+    }
+
+    const route =
+      quote.origin && quote.destination
+        ? `${quote.origin} → ${quote.destination}`
+        : quote.destination || quote.origin || '—';
+
+    copyToClipboard(
+      `🚐 COTIZACIÓN DE VIAJE\n\nCliente: ${quote.client_name || 'Por definir'}\n\n📍 RUTA\n${route}\n\n💰 Total: ${formatCurrency(quote.total_amount)}`
+    );
+  };
+
+  const resolveTripFromQuote = (quote, quoteData) => {
+    if (quoteData.trip && (quoteData.trip.origin || quoteData.trip.dateStart)) {
+      return quoteData.trip;
+    }
+    const startStr = quote.start_date ? String(quote.start_date).slice(0, 10) : '';
+    const endStr = quote.end_date ? String(quote.end_date).slice(0, 10) : '';
+    return {
+      roundTrip: Boolean(endStr && endStr !== startStr),
+      dateStart: startStr,
+      dateEnd: endStr && endStr !== startStr ? endStr : '',
+      origin: quote.origin || '',
+      destination: quote.destination || ''
+    };
+  };
+
+  const resolveSelectedQuoteForPdf = (quote, quoteData) => {
+    const ix = quoteData.selectedVehicleIndex ?? 0;
+    const sel =
+      quoteData.results?.quotations?.[ix] || quoteData.results?.quotations?.[0];
+    if (sel) return sel;
+    return {
+      vehicleType: '',
+      capacity: quote.passenger_count ?? '',
+      costs: { total: parseFloat(quote.total_amount) || 0 }
+    };
+  };
+
+  const handleDownloadQuotePdf = (quote) => {
+    try {
+      const quoteData = parseQuoteData(quote.notes);
+      const trip = resolveTripFromQuote(quote, quoteData);
+      const selectedQuote = resolveSelectedQuoteForPdf(quote, quoteData);
+
+      const isConcepts =
+        quoteData.quoteMode === 'concepts' || quoteData.results?.quoteMode === 'concepts';
+
+      if (
+        !isConcepts &&
+        !trip.origin?.trim() &&
+        !trip.destination?.trim() &&
+        !quote.origin &&
+        !quote.destination
+      ) {
+        setToast({ message: 'La cotización no tiene origen/destino para el PDF', type: 'error' });
+        return;
+      }
+
+      const info = buildQuotePdfInfo({
+        clientName: quote.client_name || quoteData.client_name || quoteData.clientName,
+        trip,
+        quotations: quoteData.results?.quotations || [],
+        selectedQuote,
+        selectedVehicleIndex: quoteData.selectedVehicleIndex ?? 0,
+        agreedAmount: quoteData.agreedAmount || '',
+        agreedAmounts: quoteData.agreedAmounts || {},
+        pdfNote: quoteData.pdfNote || '',
+        editingQuote: { quote_number: quote.quote_number || quote.id },
+        quoteMode: quoteData.quoteMode,
+        serviceItems: quoteData.serviceItems || []
+      });
+      generateQuotePdf(info);
+      setToast({ message: 'PDF de cotización descargado', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ message: 'Error al generar el PDF', type: 'error' });
+    }
   };
 
   const generateContractNumber = () => {
@@ -182,6 +296,8 @@ const Quotes = () => {
       return {
         client_name: data.client_name || '',
         clientName: data.client_name || '',
+        quoteMode: data.quoteMode || 'calculated',
+        serviceItems: Array.isArray(data.serviceItems) ? data.serviceItems : [],
         days: data.days || [],
         trip: data.trip || null,
         selectedVehicleIndex: data.selectedVehicleIndex,
@@ -189,6 +305,9 @@ const Quotes = () => {
         costs: data.costs || {},
         results: data.results || null,
         agreedAmount: data.agreedAmount || '',
+        agreedAmounts:
+          data.agreedAmounts && typeof data.agreedAmounts === 'object' ? data.agreedAmounts : {},
+        pdfNote: data.pdfNote || '',
         whatsappClient: data.whatsapp_client || '',
         whatsappInternal: data.whatsapp_internal || '',
         manualAdjustments: data.manualAdjustments || {},
@@ -230,6 +349,8 @@ const Quotes = () => {
       const completeQuoteData = {
         client_name: quoteData.client_name,
         client_id: quoteData.client_id,
+        quoteMode: quoteData.quoteMode || 'calculated',
+        serviceItems: quoteData.serviceItems || [],
         trip: quoteData.trip || null,
         selectedVehicleIndex: quoteData.selectedVehicleIndex ?? null,
         days: quoteData.days,
@@ -237,6 +358,8 @@ const Quotes = () => {
         costs: quoteData.costs,
         results: quoteData.results,
         agreedAmount: quoteData.agreedAmount,
+        agreedAmounts: quoteData.agreedAmounts || {},
+        pdfNote: quoteData.pdfNote || '',
         whatsapp_client: quoteData.whatsapp_client,
         whatsapp_internal: quoteData.whatsapp_internal,
         manualAdjustments: quoteData.manualAdjustments,
@@ -271,11 +394,18 @@ const Quotes = () => {
         itinerary: JSON.stringify(daysArr),
         num_units: 1,
         passenger_count: selQ?.capacity || quoteData.results?.quotations?.[0]?.capacity || 0,
-        total_amount:
-          parseFloat(quoteData.agreedAmount) ||
-          selQ?.costs?.total ||
-          quoteData.results?.quotations?.[0]?.costs?.total ||
-          0,
+        total_amount: (() => {
+          const key = selQ?.quoteKey;
+          const map = quoteData.agreedAmounts || {};
+          const fromMap = key && map[key] != null ? parseFloat(map[key]) : NaN;
+          if (Number.isFinite(fromMap) && fromMap > 0) return fromMap;
+          return (
+            parseFloat(quoteData.agreedAmount) ||
+            selQ?.costs?.total ||
+            quoteData.results?.quotations?.[0]?.costs?.total ||
+            0
+          );
+        })(),
         status: 'Pendiente',
         notes: JSON.stringify(completeQuoteData) // Save everything as JSON
       };
@@ -390,7 +520,10 @@ const Quotes = () => {
       <Header
         title="Cotizaciones"
         buttonText="+ Nueva Cotización"
-        onButtonClick={() => setIsCalculatorOpen(true)}
+        onButtonClick={() => {
+          setEditingQuoteData(null);
+          setIsCalculatorOpen(true);
+        }}
       />
       
       {/* Search Bar */}
@@ -414,6 +547,34 @@ const Quotes = () => {
         data={filteredQuotes}
         onView={handleView}
         onDelete={handleDelete}
+        customActions={(row) => (
+          <>
+            <button
+              type="button"
+              onClick={() => handleCopyQuoteMessage(row)}
+              className="text-emerald-600 hover:text-emerald-900 transition-colors p-1"
+              title="Copiar mensaje de cotización (WhatsApp)"
+            >
+              <Copy size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCopySimilar(row)}
+              className="text-violet-600 hover:text-violet-900 transition-colors p-1"
+              title="Crear cotización similar"
+            >
+              <CopyPlus size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownloadQuotePdf(row)}
+              className="text-sky-600 hover:text-sky-900 transition-colors p-1"
+              title="Descargar PDF de cotización"
+            >
+              <FileDown size={18} />
+            </button>
+          </>
+        )}
       />
       
       <QuoteCalculator
@@ -492,13 +653,36 @@ const Quotes = () => {
                 )}
               </div>
               
-              <Button
-                onClick={() => handleEditQuote(viewingQuote)}
-                variant="primary"
-                size="sm"
-              >
-                ✏️ Editar Cotización
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => handleCopyQuoteMessage(viewingQuote)}
+                  variant="success"
+                  size="sm"
+                >
+                  <Copy size={16} className="mr-1" /> Copiar cotización
+                </Button>
+                <Button
+                  onClick={() => handleCopySimilar(viewingQuote)}
+                  variant="secondary"
+                  size="sm"
+                >
+                  <CopyPlus size={16} className="mr-1" /> Crear similar
+                </Button>
+                <Button
+                  onClick={() => handleDownloadQuotePdf(viewingQuote)}
+                  variant="secondary"
+                  size="sm"
+                >
+                  <FileDown size={16} className="mr-1" /> PDF
+                </Button>
+                <Button
+                  onClick={() => handleEditQuote(viewingQuote)}
+                  variant="primary"
+                  size="sm"
+                >
+                  ✏️ Editar Cotización
+                </Button>
+              </div>
             </div>
 
             {/* Client Info */}
@@ -618,6 +802,35 @@ const Quotes = () => {
               );
             })()}
 
+            {(() => {
+              const quoteData = parseQuoteData(viewingQuote.notes);
+              const isConcepts =
+                quoteData.quoteMode === 'concepts' || quoteData.results?.quoteMode === 'concepts';
+              const items = (quoteData.serviceItems || []).filter(
+                (item) => parseServiceItemAmount(item) > 0
+              );
+              if (!isConcepts || !items.length) return null;
+              return (
+                <div className="border-b pb-4">
+                  <h3 className="text-lg font-semibold mb-2">Conceptos del servicio</h3>
+                  <ul className="space-y-2">
+                    {items.map((item) => (
+                      <li
+                        key={item.id || `${serviceItemDisplayLabel(item)}-${item.amount}`}
+                        className="flex justify-between bg-indigo-50 px-3 py-2 rounded-lg text-sm"
+                      >
+                        <span>{serviceItemDisplayLabel(item)}</span>
+                        <span className="font-semibold">{formatCurrency(parseServiceItemAmount(item))}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-sm font-semibold text-indigo-950 mt-3">
+                    Total conceptos: {formatCurrency(sumServiceItems(items))}
+                  </p>
+                </div>
+              );
+            })()}
+
             {/* Pricing Details */}
             {(() => {
               const quoteData = parseQuoteData(viewingQuote.notes);
@@ -630,6 +843,13 @@ const Quotes = () => {
                         <h4 className="font-bold text-blue-900 text-lg mb-3">{quote.vehicleType}</h4>
                         <p className="text-sm text-gray-600 mb-3">Capacidad: {quote.capacity} pasajeros</p>
                         <div className="space-y-2 text-sm">
+                          {quote.costs?.conceptsMode ? (
+                            <div className="flex justify-between font-bold text-blue-900 text-lg pt-2 border-t border-blue-300">
+                              <span>Total por conceptos:</span>
+                              <span>{formatCurrency(quote.costs.total)}</span>
+                            </div>
+                          ) : (
+                          <>
                           <div className="flex justify-between">
                             <span className="text-gray-700">Gasolina:</span>
                             <span className="font-medium">{formatCurrency(quote.costs.fuel)}</span>
@@ -683,6 +903,8 @@ const Quotes = () => {
                             <span className="font-bold text-blue-900">TOTAL:</span>
                             <span className="font-bold text-blue-900 text-lg">{formatCurrency(quote.costs.total)}</span>
                           </div>
+                          </>
+                          )}
                         </div>
                       </div>
                     ))}

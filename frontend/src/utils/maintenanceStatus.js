@@ -67,9 +67,22 @@ export function alertProgress(kmRemaining, warnBeforeKm = 5000, criticalBeforeKm
 export const ITEM_KIND_PRESETS = {
   oil: { title: 'Cambio de aceite', interval_km: 10000, warn_before_km: 5000, critical_before_km: 2000 },
   brakes: { title: 'Frenos (balatas/discos)', interval_km: 30000, warn_before_km: 5000, critical_before_km: 2000 },
+  adblue: { title: 'AdBlue (urea)', interval_km: 15000, warn_before_km: 3000, critical_before_km: 1500 },
+  tires_front: { title: 'Llantas delanteras', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
+  tires_rear: { title: 'Llantas traseras', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
+  /** @deprecated usar tires_front / tires_rear */
   tires: { title: 'Llantas', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
   custom: { title: '', interval_km: null, warn_before_km: 5000, critical_before_km: 2000 }
 };
+
+export const SERVICE_KIND_OPTIONS = [
+  { value: 'oil', label: 'Cambio de aceite' },
+  { value: 'brakes', label: 'Frenos' },
+  { value: 'adblue', label: 'AdBlue (urea)' },
+  { value: 'tires_front', label: 'Llantas delanteras' },
+  { value: 'tires_rear', label: 'Llantas traseras' },
+  { value: 'custom', label: 'Otro' }
+];
 
 export const INCIDENT_TYPE_LABELS = {
   crash: 'Choque / accidente',

@@ -514,6 +514,8 @@ const Expenses = () => {
     const q = tableSearch.toLowerCase().trim();
     return expenses.filter((row) => {
       if (matchesAmountSearch(tableSearch.trim(), row.amount)) return true;
+      const expenseType = (row.expense_type || '').toLowerCase();
+      if (expenseType.includes(q)) return true;
       const source = getExpenseSource(row);
       if (source.type === 'contract') {
         const contract = contracts.find((c) => c.id === row.contract_id);
@@ -821,7 +823,7 @@ const Expenses = () => {
       <div className="mb-4">
         <input
           type="text"
-          placeholder="Contrato, cliente, origen o monto (ej. 500 o 1200.50)..."
+          placeholder="Contrato, cliente, origen, tipo o monto (ej. combustible, casetas, 500)..."
           value={tableSearch}
           onChange={(e) => setTableSearch(e.target.value)}
           className="w-full md:w-96 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"

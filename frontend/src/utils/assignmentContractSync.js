@@ -52,15 +52,57 @@ export function mergeAssignmentForEdit(tableRow, contractNotes) {
   return tableRow;
 }
 
-/** Nombre del chofer vigente (una sola asignación por contrato). */
+/** Todos los choferes asignados al contrato (orden alfabético). */
 export function getPrimaryDriverNames(contractId, assignments, contractNotes) {
   const rows = (assignments || []).filter(
     (a) => a.contract_id != null && String(a.contract_id) === String(contractId)
   );
-  const primary = pickPrimaryAssignment(rows);
-  if (primary?.driver_name) return [primary.driver_name];
+  const fromRows = [...new Set(rows.map((r) => r.driver_name).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, 'es', { sensitivity: 'base' })
+  );
+  if (fromRows.length) return fromRows;
+
+  const notes = parseContractNotes(contractNotes);
+  if (Array.isArray(notes.assignments) && notes.assignments.length) {
+    const fromNotes = [
+      ...new Set(notes.assignments.map((a) => a.driver_name).filter(Boolean))
+    ].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+    if (fromNotes.length) return fromNotes;
+  }
+
   const block = getNotesAssignmentBlock(contractNotes);
   if (block?.driver_name) return [block.driver_name];
+  return [];
+}
+
+/** Filas de assignments para editar en el modal de contrato. */
+export function getAssignmentsForContract(contractId, assignments, contractNotes) {
+  const rows = (assignments || [])
+    .filter((a) => a.contract_id != null && String(a.contract_id) === String(contractId))
+    .slice()
+    .sort((a, b) => {
+      const na = String(a.driver_name || '');
+      const nb = String(b.driver_name || '');
+      return na.localeCompare(nb, 'es', { sensitivity: 'base' });
+    });
+
+  if (rows.length) {
+    return rows.map((row) => mergeAssignmentForEdit(row, contractNotes)).filter(Boolean);
+  }
+
+  const block = getNotesAssignmentBlock(contractNotes);
+  if (block?.driver_id) {
+    return [
+      {
+        id: null,
+        contract_id: contractId,
+        driver_id: block.driver_id,
+        vehicle_id: block.vehicle_id ?? null,
+        driving_date: block.driving_date ?? null,
+        assigned_date: block.assigned_date ?? null
+      }
+    ];
+  }
   return [];
 }
 

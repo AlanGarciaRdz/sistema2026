@@ -28,6 +28,7 @@ import VehicleFleetCard from '../components/maintenance/VehicleFleetCard';
 import { copyVehicleReportPortalLink } from '../utils/vehicleReportPortal';
 import {
   ITEM_KIND_PRESETS,
+  SERVICE_KIND_OPTIONS,
   formatKm,
   INCIDENT_TYPE_LABELS,
   INCIDENT_SEVERITY_LABELS,
@@ -774,12 +775,7 @@ const Maintenance = () => {
             label="Tipo"
             value={serviceForm.item_kind}
             onChange={(e) => applyServiceKindPreset(e.target.value)}
-            options={[
-              { value: 'oil', label: 'Cambio de aceite' },
-              { value: 'brakes', label: 'Frenos' },
-              { value: 'tires', label: 'Llantas' },
-              { value: 'custom', label: 'Otro' }
-            ]}
+            options={SERVICE_KIND_OPTIONS}
           />
           <FormInput
             label="Nombre"

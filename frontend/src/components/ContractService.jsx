@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { getClients, getVehicles, getDrivers } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
@@ -29,12 +30,21 @@ const UNIT_TYPES = [
     return `${year}${month}${day}${hour}${minute}`;
   };
 
+function newDriverAssignmentRow() {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: null,
+    driver_id: '',
+    driving_date: ''
+  };
+}
+
 const ContractService = ({
   isOpen,
   onClose,
   onSave,
   editingContract,
-  initialAssignment = null
+  initialAssignments = []
 }) => {
 
     // ── mode & folio ──
@@ -50,8 +60,7 @@ const ContractService = ({
     const [selectedVehicle, setSelectedVehicle] = useState(null);
 
     const [drivers, setDrivers] = useState([]);
-    const [selectedDriverId, setSelectedDriverId] = useState('');
-    const [drivingDate, setDrivingDate] = useState('');
+    const [driverRows, setDriverRows] = useState([]);
     const [assignedDate, setAssignedDate] = useState(() => new Date().toISOString().slice(0, 10));
 
     const [loading, setLoading] = useState(false);
@@ -115,10 +124,38 @@ const ContractService = ({
     const tripDateDefault = mode === 'contrato' ? departure : serviceDate;
 
     useEffect(() => {
-      if (!isOpen || !tripDateDefault) return;
-      if (initialAssignment?.driving_date && loadedAssignmentRef.current === initialAssignment.id) return;
-      setDrivingDate(tripDateDefault);
-    }, [isOpen, tripDateDefault, mode, departure, serviceDate, initialAssignment?.id, initialAssignment?.driving_date]);
+      if (!isOpen) return;
+      const signature =
+        initialAssignments?.length > 0
+          ? initialAssignments.map((a) => `${a.id || 'n'}-${a.driver_id}`).join('|')
+          : 'empty';
+      if (loadedAssignmentRef.current === signature) return;
+      loadedAssignmentRef.current = signature;
+
+      if (initialAssignments?.length) {
+        setDriverRows(
+          initialAssignments.map((a) => ({
+            key: a.id ? `a-${a.id}` : newDriverAssignmentRow().key,
+            id: a.id ?? null,
+            driver_id: a.driver_id != null ? String(a.driver_id) : '',
+            driving_date: a.driving_date ? String(a.driving_date).slice(0, 10) : ''
+          }))
+        );
+        const firstAssigned = initialAssignments.find((a) => a.assigned_date)?.assigned_date;
+        if (firstAssigned) {
+          setAssignedDate(String(firstAssigned).slice(0, 10));
+        }
+        const withVehicle = initialAssignments.find((a) => a.vehicle_id);
+        if (withVehicle?.vehicle_id && vehicles.length) {
+          const v =
+            vehicles.find((ve) => String(ve.id) === String(withVehicle.vehicle_id)) || null;
+          if (v) setSelectedVehicle(v);
+        }
+      } else {
+        setDriverRows([]);
+      }
+    }, [isOpen, initialAssignments, vehicles]);
+
     useEffect(() => {
         if (editingContract && isOpen) {
           const loadKey = editingContract.id ?? editingContract.folio ?? 'copy';
@@ -166,29 +203,17 @@ const ContractService = ({
         }
       }, [editingContract, isOpen]);
 
-    useEffect(() => {
-      if (!isOpen || !initialAssignment?.id) return;
-      if (loadedAssignmentRef.current === initialAssignment.id) return;
-      loadedAssignmentRef.current = initialAssignment.id;
-      setSelectedDriverId(
-        initialAssignment.driver_id != null ? String(initialAssignment.driver_id) : ''
-      );
-      setDrivingDate(
-        initialAssignment.driving_date
-          ? String(initialAssignment.driving_date).slice(0, 10)
-          : ''
-      );
-      setAssignedDate(
-        initialAssignment.assigned_date
-          ? String(initialAssignment.assigned_date).slice(0, 10)
-          : new Date().toISOString().slice(0, 10)
-      );
-      if (initialAssignment.vehicle_id && vehicles.length) {
-        const v =
-          vehicles.find((ve) => String(ve.id) === String(initialAssignment.vehicle_id)) || null;
-        if (v) setSelectedVehicle(v);
-      }
-    }, [isOpen, initialAssignment, vehicles]);
+    const updateDriverRow = (key, patch) => {
+      setDriverRows((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+    };
+
+    const addDriverRow = () => {
+      setDriverRows((rows) => [...rows, { ...newDriverAssignmentRow(), driving_date: tripDateDefault || '' }]);
+    };
+
+    const removeDriverRow = (key) => {
+      setDriverRows((rows) => rows.filter((row) => row.key !== key));
+    };
 
     const fetchClients = async () => {
         try {
@@ -230,8 +255,7 @@ const ContractService = ({
     const resetForm = () => {
         setSelectedClient(null);
         setSelectedVehicle(null);
-        setSelectedDriverId('');
-        setDrivingDate('');
+        setDriverRows([]);
         setAssignedDate(new Date().toISOString().slice(0, 10));
         loadedAssignmentRef.current = null;
         setContactName('');
@@ -342,23 +366,27 @@ const ContractService = ({
         status,
         };
         const tripDate = mode === 'contrato' ? departure : serviceDate;
-        if (selectedDriverId && !drivingDate && !tripDate) {
+        const validDriverRows = driverRows.filter((row) => row.driver_id);
+        const driverIds = validDriverRows.map((row) => row.driver_id);
+        if (driverIds.length !== new Set(driverIds).size) {
+          setToast({ message: 'No puedes asignar el mismo chofer dos veces', type: 'error' });
+          return;
+        }
+        if (validDriverRows.length && !tripDate && validDriverRows.every((row) => !row.driving_date)) {
           setToast({
-            message: 'Indica la fecha del viaje o la fecha de manejo para asignar chofer',
+            message: 'Indica la fecha del viaje o la fecha de manejo para asignar choferes',
             type: 'error'
           });
           return;
         }
 
-        const assignment = selectedDriverId
-          ? {
-              id: initialAssignment?.id || null,
-              driver_id: parseInt(selectedDriverId, 10),
-              vehicle_id: selectedVehicle?.id || null,
-              driving_date: drivingDate || tripDate,
-              assigned_date: assignedDate || new Date().toISOString().slice(0, 10)
-            }
-          : null;
+        const assignments = validDriverRows.map((row) => ({
+          id: row.id,
+          driver_id: parseInt(row.driver_id, 10),
+          vehicle_id: selectedVehicle?.id || null,
+          driving_date: row.driving_date || tripDate,
+          assigned_date: assignedDate || new Date().toISOString().slice(0, 10)
+        }));
 
         const payload = mode === 'contrato'
         ? {
@@ -369,9 +397,9 @@ const ContractService = ({
             returnTime,
             calendarEventMode,
             capacity: parseInt(capacity) || null,
-            assignment
+            assignments
           }
-        : { ...base, serviceDate, serviceTime, assignment };
+        : { ...base, serviceDate, serviceTime, assignments };
 
         try {
           await onSave(payload);
@@ -789,34 +817,68 @@ const ContractService = ({
               </select>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Chofer</label>
-              <select
-                value={selectedDriverId}
-                onChange={(e) => setSelectedDriverId(e.target.value)}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
-              >
-                <option value="">— Sin asignar —</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div className="col-span-2 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-gray-500">Choferes</label>
+                <button
+                  type="button"
+                  onClick={addDriverRow}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:text-violet-900"
+                >
+                  <Plus size={14} /> Agregar chofer
+                </button>
+              </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">
-                Fecha de manejo {selectedDriverId ? <span className="text-red-500">*</span> : null}
-              </label>
-              <input
-                type="date"
-                value={drivingDate}
-                onChange={(e) => setDrivingDate(e.target.value)}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
-              />
+              {driverRows.length === 0 ? (
+                <p className="text-xs text-gray-500 rounded-lg border border-dashed border-gray-200 px-3 py-2">
+                  Sin choferes asignados. Usa «Agregar chofer» si el servicio requiere uno o más operadores.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {driverRows.map((row, index) => (
+                    <div
+                      key={row.key}
+                      className="grid grid-cols-1 sm:grid-cols-[1fr_160px_auto] gap-2 items-end rounded-lg border border-gray-200 bg-gray-50/80 p-2"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-gray-500">Chofer {index + 1}</span>
+                        <select
+                          value={row.driver_id}
+                          onChange={(e) => updateDriverRow(row.key, { driver_id: e.target.value })}
+                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+                        >
+                          <option value="">— Elegir chofer —</option>
+                          {drivers.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-gray-500">Fecha de manejo</span>
+                        <input
+                          type="date"
+                          value={row.driving_date || tripDateDefault || ''}
+                          onChange={(e) => updateDriverRow(row.key, { driving_date: e.target.value })}
+                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeDriverRow(row.key)}
+                        className="self-end p-2 text-red-600 hover:text-red-800"
+                        title="Quitar chofer"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <p className="text-[11px] text-gray-400">
-                Por defecto usa la fecha de salida / servicio del viaje.
+                Puedes asignar varios choferes al mismo servicio. Por defecto usa la fecha de salida / servicio.
               </p>
             </div>
 

@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, Copy, Save, FileDown } from 'lucide-react';
+import { X, Copy, Save, FileDown, Plus, Trash2 } from 'lucide-react';
 import Button from './Button';
 import FormInput from './FormInput';
 import FormSelect from './FormSelect';
 import { getClients } from '../services/api';
 import { diffInclusiveCalendarDays } from '../utils/formatDateLocal';
 import { buildQuotePdfInfo, generateQuotePdf } from '../utils/quotePdfUtils';
+import {
+  newServiceItem,
+  serviceItemDisplayLabel,
+  parseServiceItemAmount,
+  sumServiceItems,
+  hasValidServiceItems,
+  tripSummaryFromConcepts
+} from '../utils/quoteServiceUtils';
 
 /** arma `days` legacy para cotizaciones / API cuando solo hay trip simple */
 function buildLegacyDays(trip) {
@@ -106,7 +114,12 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     extraMovements: 0
   });
 
-  const [agreedAmount, setAgreedAmount] = useState('');
+  const [agreedAmounts, setAgreedAmounts] = useState({});
+  /** Nota personal que aparece en el PDF de cotización */
+  const [pdfNote, setPdfNote] = useState('');
+  /** calculated = por km · concepts = traslados / días / servicios con monto fijo */
+  const [quoteMode, setQuoteMode] = useState('calculated');
+  const [serviceItems, setServiceItems] = useState([]);
   const [clientName, setClientName] = useState('');
   const [clientType, setClientType] = useState('existing');
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -162,7 +175,10 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     setCosts(defaultCosts());
     setDaysNights({ days: 1, nights: 0 });
     setSelectedVehicleKey('v2');
-    setAgreedAmount('');
+    setAgreedAmounts({});
+    setPdfNote('');
+    setQuoteMode('calculated');
+    setServiceItems([]);
     setClientSearchQuery('');
   }
 
@@ -255,7 +271,30 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
         setSelectedVehicleKey('v2');
       }
 
-      setAgreedAmount(editingQuote.agreedAmount || '');
+      setAgreedAmounts(() => {
+        const stored =
+          editingQuote.agreedAmounts && typeof editingQuote.agreedAmounts === 'object'
+            ? { ...editingQuote.agreedAmounts }
+            : {};
+        if (!Object.keys(stored).length && editingQuote.agreedAmount) {
+          const idx =
+            typeof editingQuote.selectedVehicleIndex === 'number'
+              ? editingQuote.selectedVehicleIndex
+              : 0;
+          const key =
+            editingQuote.results?.quotations?.[idx]?.quoteKey ||
+            res?.quotations?.[idx]?.quoteKey;
+          if (key) stored[key] = String(editingQuote.agreedAmount);
+        }
+        return stored;
+      });
+      setPdfNote(editingQuote.pdfNote || '');
+      setQuoteMode(editingQuote.quoteMode === 'concepts' ? 'concepts' : 'calculated');
+      setServiceItems(
+        Array.isArray(editingQuote.serviceItems) && editingQuote.serviceItems.length
+          ? editingQuote.serviceItems.map((it) => ({ ...newServiceItem(it.kind || 'transfer'), ...it }))
+          : []
+      );
     }
   }, [clients, isOpen, editingQuote]);
 
@@ -297,46 +336,11 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
   };
 
   const results = useMemo(() => {
-    const kmOneWayEffective = (() => {
-      const fromAdj =
-        manualAdjustments.adjustedDistance > 0
-          ? manualAdjustments.adjustedDistance
-          : distances.totalKm || 0;
-      return Number(fromAdj) || 0;
-    })();
-
-    if (!(kmOneWayEffective > 0)) return null;
-
     const totalDays =
       parseInt(daysNights.days, 10) ||
       (trip.roundTrip ? diffInclusiveCalendarDays(trip.dateStart, trip.dateEnd) || 1 : 1);
     const totalNights =
       parseInt(daysNights.nights, 10) || (totalDays > 0 ? Math.max(0, totalDays - 1) : 0);
-
-    const km0 = kmOneWayEffective + (parseFloat(manualAdjustments.extraMovements) || 0);
-    let kmFuel = km0;
-    if (trip.roundTrip) {
-      kmFuel = costs.returnVehicle ? km0 * 4 : km0 * 2;
-    }
-
-    const fuelEfficiency = parseFloat(costs.fuelEfficiency) || 1;
-    const fuelLiters = kmFuel / fuelEfficiency;
-    const fuelCost = fuelLiters * (parseFloat(costs.fuelPricePerLiter) || 0);
-
-    const tollsCost = getTollsCost();
-    const accommodationCost =
-      (parseFloat(costs.accommodationPerDay) || 0) * (trip.roundTrip ? totalNights : 0);
-    const pensionCost = costs.includePension
-      ? (parseFloat(costs.pensionPerDay) || 0) * totalDays
-      : 0;
-
-    const busCost = costs.includeBus ? (parseFloat(costs.busPrice) || 0) * 2 : 0;
-
-    const derechoPisoCost = costs.includeDerechoPiso ? parseFloat(costs.derechoPiso) || 0 : 0;
-
-    const marginPctRaw = parseFloat(costs.driverPercentage);
-    const marginPct = Number.isFinite(marginPctRaw) ? Math.min(99, Math.max(0, marginPctRaw)) : 20;
-    const divisor = Math.max(0.01, (100 - marginPct) / 100);
 
     const vehicleDefs = [
       {
@@ -375,6 +379,82 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
         showKey: 'showQuoteSuburban'
       }
     ];
+
+    if (quoteMode === 'concepts') {
+      if (!hasValidServiceItems(serviceItems)) return null;
+      const conceptsTotal = sumServiceItems(serviceItems);
+      const quotations = [];
+
+      for (const def of vehicleDefs) {
+        if (costs[def.showKey] === false) continue;
+        quotations.push({
+          quoteKey: def.quoteKey,
+          vehicleType: def.name,
+          capacity: def.capacity,
+          costs: {
+            fuel: 0,
+            tolls: 0,
+            accommodation: 0,
+            pension: 0,
+            vehicleRental: 0,
+            bus: 0,
+            derechoPiso: 0,
+            internalSubtotal: conceptsTotal,
+            marginPercent: 0,
+            marginAmount: 0,
+            driver: 0,
+            total: conceptsTotal,
+            clientTotal: conceptsTotal,
+            conceptsMode: true
+          }
+        });
+      }
+
+      if (!quotations.length) return null;
+
+      return {
+        days: totalDays,
+        nights: totalNights,
+        conceptsTotal,
+        quoteMode: 'concepts',
+        quotations
+      };
+    }
+
+    const kmOneWayEffective = (() => {
+      const fromAdj =
+        manualAdjustments.adjustedDistance > 0
+          ? manualAdjustments.adjustedDistance
+          : distances.totalKm || 0;
+      return Number(fromAdj) || 0;
+    })();
+
+    if (!(kmOneWayEffective > 0)) return null;
+
+    const km0 = kmOneWayEffective + (parseFloat(manualAdjustments.extraMovements) || 0);
+    let kmFuel = km0;
+    if (trip.roundTrip) {
+      kmFuel = costs.returnVehicle ? km0 * 4 : km0 * 2;
+    }
+
+    const fuelEfficiency = parseFloat(costs.fuelEfficiency) || 1;
+    const fuelLiters = kmFuel / fuelEfficiency;
+    const fuelCost = fuelLiters * (parseFloat(costs.fuelPricePerLiter) || 0);
+
+    const tollsCost = getTollsCost();
+    const accommodationCost =
+      (parseFloat(costs.accommodationPerDay) || 0) * (trip.roundTrip ? totalNights : 0);
+    const pensionCost = costs.includePension
+      ? (parseFloat(costs.pensionPerDay) || 0) * totalDays
+      : 0;
+
+    const busCost = costs.includeBus ? (parseFloat(costs.busPrice) || 0) * 2 : 0;
+
+    const derechoPisoCost = costs.includeDerechoPiso ? parseFloat(costs.derechoPiso) || 0 : 0;
+
+    const marginPctRaw = parseFloat(costs.driverPercentage);
+    const marginPct = Number.isFinite(marginPctRaw) ? Math.min(99, Math.max(0, marginPctRaw)) : 20;
+    const divisor = Math.max(0.01, (100 - marginPct) / 100);
 
     const quotations = [];
 
@@ -424,7 +504,7 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
       kmFuelOperational: kmFuel,
       quotations
     };
-  }, [trip, costs, daysNights, distances, manualAdjustments]);
+  }, [quoteMode, serviceItems, trip, costs, daysNights, distances, manualAdjustments]);
 
   useEffect(() => {
     const q = results?.quotations;
@@ -460,7 +540,34 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     }
   };
 
+  const formatQuoteMoney = (amount) =>
+    (amount || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
   const itineraryTextLines = () => {
+    if (quoteMode === 'concepts') {
+      const lines = (serviceItems || [])
+        .filter(
+          (item) =>
+            parseServiceItemAmount(item) > 0 ||
+            String(item.from || '').trim() ||
+            String(item.to || '').trim() ||
+            String(item.label || '').trim()
+        )
+        .map((item) => {
+          const amt = parseServiceItemAmount(item);
+          const label = serviceItemDisplayLabel(item);
+          return amt > 0 ? `• ${label}: $${formatQuoteMoney(amt)}` : `• ${label}`;
+        });
+      if (trip.dateStart) {
+        lines.push(
+          trip.roundTrip
+            ? `Inicio: ${trip.dateStart} · Fin: ${trip.dateEnd || 'Por definir'}`
+            : `Fecha: ${trip.dateStart}`
+        );
+      }
+      return lines.length ? lines : ['Agrega conceptos con monto'];
+    }
+
     const o = trip.origin?.trim();
     const d = trip.destination?.trim();
     const lineRoute = `${o || '—'} → ${d || '—'}`;
@@ -474,6 +581,19 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
     ];
   };
 
+  const parseAgreedOverride = (quoteKey) => {
+    const raw = agreedAmounts[quoteKey];
+    if (raw == null || String(raw).trim() === '') return null;
+    const n = parseFloat(String(raw).replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  /** Precio para cliente (PDF/WhatsApp): acordado si existe, si no el calculado. */
+  const getQuotePriceForClient = (quote) => {
+    const override = parseAgreedOverride(quote.quoteKey);
+    return override ?? quote.costs.total;
+  };
+
   const generateClientWhatsApp = () => {
     if (!results) return '';
 
@@ -485,17 +605,16 @@ const QuoteCalculator = ({ isOpen, onClose, onSave, editingQuote }) => {
 
     const lines = itineraryTextLines();
     const txt = `${lines.join('\n')}`;
+    const routeHeader = quoteMode === 'concepts' ? '📋 *CONCEPTOS*' : '📍 *RUTA*';
 
     return `🚐 *COTIZACIÓN DE VIAJE*
 
 👤 Cliente: ${clientName || 'Por definir'}
 
-📍 *RUTA*
+${routeHeader}
 ${txt}
 
-💰 ${sel.vehicleType} (${sel.capacity} pax): *$${sel.costs.total
-      .toFixed(2)
-      .replace(/\B(?=(\d{3})+(?!\d))/g, ',')}*
+💰 ${sel.vehicleType} (${sel.capacity} pax): *$${formatQuoteMoney(getQuotePriceForClient(sel))}*
 
 📅 Duración: ${results.days} día${results.days > 1 ? 's' : ''}${results.nights !== undefined ? ` · ${results.nights} noches` : ''}
 
@@ -508,6 +627,28 @@ ${txt}
     if (!q) return '';
 
     const lines = itineraryTextLines().join('\n');
+
+    if (quoteMode === 'concepts' || q.costs?.conceptsMode) {
+      const conceptsBlock = (serviceItems || [])
+        .filter((item) => parseServiceItemAmount(item) > 0)
+        .map((item) => `• ${serviceItemDisplayLabel(item)}: $${parseServiceItemAmount(item).toFixed(2)}`)
+        .join('\n');
+      const totalConcepts = sumServiceItems(serviceItems).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+      return `🔧 *COTIZACIÓN INTERNA (por conceptos)*
+
+Cliente: ${clientName || '—'}
+
+${lines}
+
+*Conceptos*
+${conceptsBlock || '—'}
+*TOTAL conceptos: $${totalConcepts}*
+
+*${q.vehicleType}*
+*TOTAL cliente: $${q.costs.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}*`;
+    }
+
     const d = `${lines}
 
 📏 KM ida (ajustable): ${results.kmOneWayDisplayed?.toFixed(2) ?? '—'} km · KM efectivo combustible: ${results.kmFuelOperational?.toFixed(2)} km
@@ -545,7 +686,12 @@ ${d}`;
       alert('Elige una unidad en los resultados.');
       return;
     }
-    if (!trip.origin?.trim() || !trip.destination?.trim()) {
+    if (quoteMode === 'concepts') {
+      if (!hasValidServiceItems(serviceItems)) {
+        alert('Agrega al menos un concepto con monto.');
+        return;
+      }
+    } else if (!trip.origin?.trim() || !trip.destination?.trim()) {
       alert('Indica origen y destino.');
       return;
     }
@@ -553,9 +699,13 @@ ${d}`;
       const info = buildQuotePdfInfo({
         clientName,
         trip,
+        quotations: results.quotations,
         selectedQuote: sel,
-        agreedAmount,
-        editingQuote
+        agreedAmounts,
+        pdfNote,
+        editingQuote,
+        quoteMode,
+        serviceItems
       });
       generateQuotePdf(info);
     } catch (err) {
@@ -565,7 +715,12 @@ ${d}`;
   };
 
   const handleSave = () => {
-    if (!(getKmOneWayEffective() > 0)) {
+    if (quoteMode === 'concepts') {
+      if (!hasValidServiceItems(serviceItems)) {
+        alert('Agrega al menos un concepto con monto antes de guardar.');
+        return;
+      }
+    } else if (!(getKmOneWayEffective() > 0)) {
       alert('Indica la distancia (km ida) antes de guardar.');
       return;
     }
@@ -575,16 +730,29 @@ ${d}`;
     }
 
     const daysPayload = buildLegacyDays(trip);
+    const tripSummary = tripSummaryFromConcepts(trip, serviceItems);
+    const tripForSave =
+      quoteMode === 'concepts'
+        ? {
+            ...trip,
+            origin: trip.origin?.trim() || tripSummary.origin,
+            destination: trip.destination?.trim() || tripSummary.destination
+          }
+        : trip;
 
     let selectedVehicleIndex =
       results.quotations.findIndex((q) => q.quoteKey === selectedVehicleKey);
     if (selectedVehicleIndex < 0) selectedVehicleIndex = 0;
 
+    const selectedAgreed = agreedAmounts[selectedVehicleKey] || '';
+
     const quoteData = {
       id: editingQuote?.id ?? null,
       client_name: clientName,
       client_id: selectedClientId || null,
-      trip,
+      quoteMode,
+      serviceItems,
+      trip: tripForSave,
       days: daysPayload,
       distances,
       manualAdjustments,
@@ -592,12 +760,33 @@ ${d}`;
       costs,
       results,
       selectedVehicleIndex,
-      agreedAmount,
+      agreedAmount: selectedAgreed,
+      agreedAmounts,
+      pdfNote,
       whatsapp_client: generateClientWhatsApp(),
       whatsapp_internal: generateInternalWhatsApp()
     };
 
     onSave(quoteData);
+  };
+
+  const updateServiceItem = (id, patch) => {
+    setServiceItems((items) => items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+  };
+
+  const removeServiceItem = (id) => {
+    setServiceItems((items) => items.filter((it) => it.id !== id));
+  };
+
+  const addServiceItem = (kind) => {
+    setServiceItems((items) => [...items, newServiceItem(kind)]);
+  };
+
+  const handleQuoteModeChange = (mode) => {
+    setQuoteMode(mode);
+    if (mode === 'concepts' && serviceItems.length === 0) {
+      setServiceItems([newServiceItem('transfer'), newServiceItem('transfer')]);
+    }
   };
 
   const filteredClientSelectOptions = useMemo(() => {
@@ -720,6 +909,31 @@ ${d}`;
               <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">
                 Viaje
               </h3>
+
+              <div className="flex flex-wrap gap-4 mb-4 p-3 rounded-lg bg-white border border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="quoteMode"
+                    checked={quoteMode === 'calculated'}
+                    onChange={() => handleQuoteModeChange('calculated')}
+                  />
+                  <span className="text-sm font-medium">Por kilometraje</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="quoteMode"
+                    checked={quoteMode === 'concepts'}
+                    onChange={() => handleQuoteModeChange('concepts')}
+                  />
+                  <span className="text-sm font-medium">Por conceptos</span>
+                  <span className="text-xs text-gray-500">
+                    (traslados, días de servicio, montos fijos)
+                  </span>
+                </label>
+              </div>
+
               <label className="flex items-center gap-2 mb-3">
                 <input
                   type="checkbox"
@@ -757,14 +971,14 @@ ${d}`;
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <FormInput
-                  label="Origen"
+                  label={quoteMode === 'concepts' ? 'Origen (referencia)' : 'Origen'}
                   value={trip.origin}
                   onChange={(e) => setTrip((t) => ({ ...t, origin: e.target.value }))}
                   placeholder="Ciudad / punto de salida"
                 />
                 <div className="flex flex-col gap-1">
                   <FormInput
-                    label="Destino"
+                    label={quoteMode === 'concepts' ? 'Destino (referencia)' : 'Destino'}
                     value={trip.destination}
                     onChange={(e) => setTrip((t) => ({ ...t, destination: e.target.value }))}
                     placeholder="Ciudad / destino"
@@ -772,21 +986,169 @@ ${d}`;
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2 items-center">
-                <Button
-                  type="button"
-                  onClick={calculateDistance}
-                  variant="primary"
-                  disabled={distances.calculating}
-                >
-                  {distances.calculating ? 'Calculando…' : 'Calcular distancia (estimación)'}
-                </Button>
-                <span className="text-xs text-gray-600">
-                  Siempre puedes corregir el km a mano abajo.
-                </span>
-              </div>
+              {quoteMode === 'calculated' && (
+                <div className="mt-3 flex flex-wrap gap-2 items-center">
+                  <Button
+                    type="button"
+                    onClick={calculateDistance}
+                    variant="primary"
+                    disabled={distances.calculating}
+                  >
+                    {distances.calculating ? 'Calculando…' : 'Calcular distancia (estimación)'}
+                  </Button>
+                  <span className="text-xs text-gray-600">
+                    Siempre puedes corregir el km a mano abajo.
+                  </span>
+                </div>
+              )}
             </section>
 
+            {quoteMode === 'concepts' && (
+              <section className="rounded-lg border border-indigo-200 p-4 bg-indigo-50/40">
+                <h3 className="text-sm font-semibold text-indigo-950 uppercase tracking-wide mb-2">
+                  Conceptos del servicio
+                </h3>
+                <p className="text-xs text-indigo-900 mb-4">
+                  Agrega cada traslado o servicio con su monto. Escribe libremente los destinos en cada
+                  concepto (ej. Hotel, Aeropuerto, Tequila, Chapala).
+                </p>
+
+                <div className="space-y-3">
+                  {serviceItems.map((item, index) => (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-indigo-100 bg-white p-3 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-gray-700">
+                          Concepto {index + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeServiceItem(item.id)}
+                          className="text-red-600 hover:text-red-800 p-1"
+                          title="Eliminar concepto"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { id: 'transfer', label: 'Traslado' },
+                          { id: 'daily', label: 'Por días' },
+                          { id: 'custom', label: 'Otro' }
+                        ].map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => updateServiceItem(item.id, { kind: opt.id })}
+                            className={`text-xs px-2 py-1 rounded-full border ${
+                              item.kind === opt.id
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-gray-700 border-gray-300'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {item.kind === 'transfer' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <FormInput
+                            label="Desde"
+                            value={item.from}
+                            onChange={(e) => updateServiceItem(item.id, { from: e.target.value })}
+                            placeholder="Ej. Hotel"
+                          />
+                          <FormInput
+                            label="Hasta"
+                            value={item.to}
+                            onChange={(e) => updateServiceItem(item.id, { to: e.target.value })}
+                            placeholder="Ej. Aeropuerto"
+                          />
+                          <FormInput
+                            label="Monto ($)"
+                            type="number"
+                            step="0.01"
+                            value={item.amount}
+                            onChange={(e) => updateServiceItem(item.id, { amount: e.target.value })}
+                            placeholder="1600"
+                          />
+                        </div>
+                      )}
+
+                      {item.kind === 'daily' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <FormInput
+                            label="Días de servicio"
+                            type="number"
+                            min="1"
+                            value={item.days}
+                            onChange={(e) => updateServiceItem(item.id, { days: e.target.value })}
+                            placeholder="5"
+                          />
+                          <FormInput
+                            label="Descripción (opcional)"
+                            value={item.label}
+                            onChange={(e) => updateServiceItem(item.id, { label: e.target.value })}
+                            placeholder="Servicio disponible"
+                          />
+                          <FormInput
+                            label="Monto total ($)"
+                            type="number"
+                            step="0.01"
+                            value={item.amount}
+                            onChange={(e) => updateServiceItem(item.id, { amount: e.target.value })}
+                            placeholder="5000"
+                          />
+                        </div>
+                      )}
+
+                      {item.kind === 'custom' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <FormInput
+                            label="Descripción"
+                            value={item.label}
+                            onChange={(e) => updateServiceItem(item.id, { label: e.target.value })}
+                            placeholder="Ej. Tequila, Chapala, servicio en ciudad"
+                          />
+                          <FormInput
+                            label="Monto ($)"
+                            type="number"
+                            step="0.01"
+                            value={item.amount}
+                            onChange={(e) => updateServiceItem(item.id, { amount: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => addServiceItem('transfer')}>
+                    <Plus size={14} className="mr-1" /> Traslado
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => addServiceItem('daily')}>
+                    <Plus size={14} className="mr-1" /> Servicio por días
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => addServiceItem('custom')}>
+                    <Plus size={14} className="mr-1" /> Otro concepto
+                  </Button>
+                </div>
+
+                {hasValidServiceItems(serviceItems) && (
+                  <p className="text-sm font-semibold text-indigo-950 mt-4">
+                    Total conceptos: ${formatQuoteMoney(sumServiceItems(serviceItems))}
+                  </p>
+                )}
+              </section>
+            )}
+
+            {quoteMode === 'calculated' && (
+            <>
             {/* KM y regreso */}
             <section className="rounded-lg border border-gray-200 p-4">
               <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">
@@ -1003,6 +1365,8 @@ ${d}`;
                 </p>
               </div>
             </section>
+            </>
+            )}
 
             {/* Rentas */}
             <section className="rounded-lg border border-gray-200 p-4 bg-slate-50/60">
@@ -1010,8 +1374,10 @@ ${d}`;
                 Renta diaria por tipo de unidad (editable)
               </h3>
               <p className="text-xs text-gray-600 mb-3">
-                Marca <strong>Mostrar</strong> para incluir ese tipo en <strong>Resultados</strong> (los montos se
-                actualizan al cambiar distancia, costos o días).
+                Marca <strong>Mostrar</strong> para incluir ese tipo en <strong>Resultados</strong>
+                {quoteMode === 'concepts'
+                  ? ' (en modo conceptos el precio es la suma de los conceptos; la renta diaria no aplica).'
+                  : ' (los montos se actualizan al cambiar distancia, costos o días).'}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 {RENT_VEHICLE_FIELDS.map((col) => (
@@ -1044,20 +1410,28 @@ ${d}`;
               <section className="rounded-lg border-2 border-blue-100 p-4">
                 <h3 className="text-lg font-semibold text-blue-950 mb-1">Resultados</h3>
                 <p className="text-sm text-gray-700 mb-3">
-                  Elige <strong>una</strong> unidad para WhatsApp y guardado (solo un radio activo). Solo aparecen los
-                  tipos que marcaste arriba.
+                  Elige <strong>una</strong> unidad para WhatsApp y guardado (radio). El{' '}
+                  <strong>total calculado</strong> no cambia; el monto acordado es aparte (PDF y cliente).
+                  El PDF incluye todas las unidades marcadas en «Mostrar en resultados».
+                  {quoteMode === 'concepts' && (
+                    <>
+                      {' '}
+                      En modo conceptos el total es la suma de los conceptos (${formatQuoteMoney(results.conceptsTotal || 0)}).
+                    </>
+                  )}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
                   {results.quotations.map((quote) => {
                     const active = selectedVehicleKey === quote.quoteKey;
+                    const agreed = parseAgreedOverride(quote.quoteKey);
                     return (
-                      <label
+                      <div
                         key={quote.quoteKey}
-                        className={`border-2 rounded-lg p-4 cursor-pointer block transition-all ${
+                        className={`border-2 rounded-lg p-4 transition-all ${
                           active ? 'bg-blue-50 border-blue-600 shadow' : 'bg-white border-gray-200'
                         }`}
                       >
-                        <div className="flex items-start gap-2 mb-2">
+                        <label className="flex items-start gap-2 mb-2 cursor-pointer">
                           <input
                             type="radio"
                             name="vehiclePick"
@@ -1069,45 +1443,80 @@ ${d}`;
                             <span className="font-semibold text-blue-950">{quote.vehicleType}</span>
                             <p className="text-xs text-gray-600">{quote.capacity} pasajeros</p>
                           </div>
-                        </div>
-                        <ul className="text-xs space-y-0.5 text-gray-800">
-                          <li>Combust.: ${quote.costs.fuel.toFixed(2)}</li>
-                          <li>Casetas: ${quote.costs.tolls.toFixed(2)}</li>
-                          <li>Viáticos: ${quote.costs.accommodation.toFixed(2)}</li>
-                          {quote.costs.pension > 0 && (
-                            <li>Pensión: ${quote.costs.pension.toFixed(2)}</li>
+                        </label>
+                        <ul className="text-xs space-y-0.5 text-gray-800 mb-3">
+                          {quote.costs.conceptsMode ? (
+                            <>
+                              <li className="text-indigo-900">
+                                Cotización por conceptos (mismo total por unidad)
+                              </li>
+                              <li className="font-bold text-blue-900 pt-1 border-t">
+                                TOTAL conceptos: ${formatQuoteMoney(quote.costs.total)}
+                              </li>
+                            </>
+                          ) : (
+                            <>
+                              <li>Combust.: ${quote.costs.fuel.toFixed(2)}</li>
+                              <li>Casetas: ${quote.costs.tolls.toFixed(2)}</li>
+                              <li>Viáticos: ${quote.costs.accommodation.toFixed(2)}</li>
+                              {quote.costs.pension > 0 && (
+                                <li>Pensión: ${quote.costs.pension.toFixed(2)}</li>
+                              )}
+                              <li>Renta: ${quote.costs.vehicleRental.toFixed(2)}</li>
+                              {quote.costs.bus > 0 && <li>Bus: ${quote.costs.bus.toFixed(2)}</li>}
+                              {quote.costs.derechoPiso > 0 && (
+                                <li>D. piso: ${quote.costs.derechoPiso.toFixed(2)}</li>
+                              )}
+                              <li>
+                                Operador ({quote.costs.marginPercent}%): $
+                                {quote.costs.marginAmount.toFixed(2)}
+                              </li>
+                              <li className="font-bold text-blue-900 pt-1 border-t">
+                                TOTAL calculado: ${formatQuoteMoney(quote.costs.total)}
+                              </li>
+                            </>
                           )}
-                          <li>Renta: ${quote.costs.vehicleRental.toFixed(2)}</li>
-                          {quote.costs.bus > 0 && <li>Bus: ${quote.costs.bus.toFixed(2)}</li>}
-                          {quote.costs.derechoPiso > 0 && (
-                            <li>D. piso: ${quote.costs.derechoPiso.toFixed(2)}</li>
+                          {agreed != null && (
+                            <li className="font-semibold text-green-800">
+                              Acordado con cliente: ${formatQuoteMoney(agreed)}
+                            </li>
                           )}
-                          <li>
-                            Operador ({quote.costs.marginPercent}%): $
-                            {quote.costs.marginAmount.toFixed(2)}
-                          </li>
-                          <li className="font-bold text-blue-900 pt-1 border-t">
-                            TOTAL: $
-                            {quote.costs.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                          </li>
                         </ul>
-                      </label>
+                        <label className="block text-xs font-medium text-green-900 mb-1">
+                          Monto acordado (PDF / cliente)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={agreedAmounts[quote.quoteKey] ?? ''}
+                          onChange={(e) =>
+                            setAgreedAmounts((prev) => ({
+                              ...prev,
+                              [quote.quoteKey]: e.target.value
+                            }))
+                          }
+                          className="w-full border border-green-300 rounded-lg px-2 py-1.5 text-sm font-semibold"
+                          placeholder="Opcional — no modifica el total calculado"
+                        />
+                      </div>
                     );
                   })}
                 </div>
 
-                <div className="rounded-lg border border-green-300 bg-green-50/90 p-4 mb-4">
-                  <label className="block text-sm font-semibold text-green-900 mb-2">
-                    Monto acordado con el cliente (opcional)
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 mb-4">
+                  <label className="block text-sm font-semibold text-amber-950 mb-2">
+                    Nota personal para el PDF (opcional)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={agreedAmount}
-                    onChange={(e) => setAgreedAmount(e.target.value)}
-                    className="w-full border border-green-400 rounded-lg px-3 py-2 text-lg font-semibold"
-                    placeholder="Si vacío → total de la unidad seleccionada"
+                  <textarea
+                    rows={3}
+                    value={pdfNote}
+                    onChange={(e) => setPdfNote(e.target.value)}
+                    placeholder="Ej. Incluye chofer bilingüe, no incluye estacionamientos, horario flexible de salida…"
+                    className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-y"
                   />
+                  <p className="text-xs text-amber-800 mt-1">
+                    Solo aparece en el PDF de cotización que entregas al cliente.
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-3">

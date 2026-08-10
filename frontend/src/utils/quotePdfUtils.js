@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import CotizacionPDF from './CotizacionPDF';
+import { tripSummaryFromConcepts } from './quoteServiceUtils';
 
 function formatDateOnly(dateStr) {
   if (!dateStr) return null;
@@ -34,38 +35,114 @@ function addDaysToToday(days) {
   return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
 
+function buildOpcionPrecio(quote, precioOverride) {
+  const precio =
+    precioOverride != null && Number.isFinite(precioOverride) && precioOverride > 0
+      ? precioOverride
+      : parseFloat(quote?.costs?.total) || 0;
+  const anticipo20 = Math.round(precio * 0.2 * 100) / 100;
+  const saldo80 = Math.round((precio - anticipo20) * 100) / 100;
+  return {
+    vehicleType: quote?.vehicleType || '',
+    capacity: quote?.capacity ?? '',
+    precio,
+    anticipo20,
+    saldo80
+  };
+}
+
+function parseAgreedOverrideFromMap(agreedAmounts, quoteKey, legacyAmount) {
+  if (agreedAmounts && quoteKey && agreedAmounts[quoteKey] != null) {
+    const raw = agreedAmounts[quoteKey];
+    if (String(raw).trim() !== '') {
+      const n = parseFloat(String(raw).replace(',', '.'));
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  if (legacyAmount != null && String(legacyAmount).trim() !== '') {
+    const n = parseFloat(String(legacyAmount).replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
 /**
- * Arma info para CotizacionPDF desde el estado de QuoteCalculator.
+ * Arma info para CotizacionPDF desde el estado de QuoteCalculator o cotización guardada.
  */
 export function buildQuotePdfInfo({
   clientName,
   trip,
+  quotations,
   selectedQuote,
+  selectedVehicleIndex,
   agreedAmount,
+  agreedAmounts,
+  pdfNote,
   folio,
-  editingQuote
+  editingQuote,
+  quoteMode,
+  serviceItems
 }) {
-  const precioCalculado = parseFloat(selectedQuote?.costs?.total) || 0;
-  const acordado = parseFloat(agreedAmount);
-  const precio = Number.isFinite(acordado) && acordado > 0 ? acordado : precioCalculado;
-  const anticipo20 = Math.round(precio * 0.2 * 100) / 100;
-  const saldo80 = Math.round((precio - anticipo20) * 100) / 100;
-
   const folioFinal =
     String(folio || editingQuote?.quote_number || '').trim() || generateQuoteFolio();
+
+  const legacyKey =
+    quotations?.[selectedVehicleIndex ?? 0]?.quoteKey ||
+    selectedQuote?.quoteKey;
+
+  let opciones = (quotations || [])
+    .filter((q) => q && (q.costs?.total != null || q.vehicleType))
+    .map((q) => {
+      const override = parseAgreedOverrideFromMap(
+        agreedAmounts,
+        q.quoteKey,
+        q.quoteKey === legacyKey ? agreedAmount : null
+      );
+      return buildOpcionPrecio(q, override);
+    });
+
+  if (!opciones.length && selectedQuote) {
+    const override = parseAgreedOverrideFromMap(
+      agreedAmounts,
+      selectedQuote.quoteKey,
+      agreedAmount
+    );
+    opciones = [buildOpcionPrecio(selectedQuote, override)];
+  }
+
+  const primary = opciones[0] || buildOpcionPrecio(selectedQuote);
+
+  const mode =
+    quoteMode === 'concepts' || quoteMode === 'calculated'
+      ? quoteMode
+      : selectedQuote?.costs?.conceptsMode || quotations?.some((q) => q?.costs?.conceptsMode)
+        ? 'concepts'
+        : 'calculated';
+  const items = Array.isArray(serviceItems) ? serviceItems : [];
+  const summary =
+    mode === 'concepts'
+      ? tripSummaryFromConcepts(trip, items)
+      : {
+          origin: trip?.origin?.trim() || '—',
+          destination: trip?.destination?.trim() || '—'
+        };
 
   return {
     folio: folioFinal,
     fechaCotizacion: formatDateOnly(new Date().toISOString().slice(0, 10)),
     clientName: clientName || 'Por definir',
-    origin: trip?.origin?.trim() || '—',
-    destination: trip?.destination?.trim() || '—',
+    origin: summary.origin || '—',
+    destination: summary.destination || '—',
     fechasServicio: formatFechasServicio(trip),
-    unitType: selectedQuote?.vehicleType || '',
-    capacity: selectedQuote?.capacity ?? '',
-    precio,
-    anticipo20,
-    saldo80,
+    quoteMode: mode,
+    serviceItems: items,
+    opciones,
+    unitType: opciones.length === 1 ? primary.vehicleType : '',
+    capacity: opciones.length === 1 ? primary.capacity : '',
+    precio: primary.precio,
+    anticipo20: primary.anticipo20,
+    saldo80: primary.saldo80,
+    pdfNote: String(pdfNote || '').trim(),
     vigencia: addDaysToToday(15)
   };
 }

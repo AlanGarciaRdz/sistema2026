@@ -34,11 +34,8 @@ import {
   diffInclusiveCalendarDays
 } from '../utils/formatDateLocal';
 import {
-  duplicateAssignmentIds,
   getPrimaryDriverNames,
-  mergeAssignmentForEdit,
-  pickPrimaryAssignment,
-  resolveAssignmentIdForContract
+  getAssignmentsForContract
 } from '../utils/assignmentContractSync';
 import TripSummaryModal from '../components/TripSummaryModal';
 
@@ -282,30 +279,44 @@ const Contracts = () => {
         setToast({ message: 'Contrato guardado exitosamente', type: 'success' });
       }
 
-      const a = payload.assignment;
-      if (contractId && a?.driver_id) {
-        const assignPayload = {
-          contract_id: contractId,
-          driver_id: a.driver_id,
-          vehicle_id: a.vehicle_id || payload.vehicle?.id || null,
-          assigned_date: a.assigned_date || null,
-          driving_date: a.driving_date || null,
-          external_company_id: null,
-          notes: null
-        };
-        const assignmentId = resolveAssignmentIdForContract(contractId, a.id, assignments);
-        let keptId = assignmentId;
+      const assignmentList = Array.isArray(payload.assignments)
+        ? payload.assignments
+        : payload.assignment
+          ? [payload.assignment]
+          : [];
 
-        if (keptId) {
-          await updateAssignment(keptId, assignPayload);
-        } else {
-          const created = await createAssignment(assignPayload);
-          keptId = created.data?.data?.id ?? null;
+      if (contractId) {
+        const existingRows = assignments.filter(
+          (a) => a.contract_id != null && String(a.contract_id) === String(contractId)
+        );
+        const keptIds = new Set();
+
+        for (const a of assignmentList) {
+          if (!a?.driver_id) continue;
+          const assignPayload = {
+            contract_id: contractId,
+            driver_id: a.driver_id,
+            vehicle_id: a.vehicle_id || payload.vehicle?.id || null,
+            assigned_date: a.assigned_date || null,
+            driving_date: a.driving_date || null,
+            external_company_id: null,
+            notes: null
+          };
+
+          if (a.id) {
+            await updateAssignment(a.id, assignPayload);
+            keptIds.add(String(a.id));
+          } else {
+            const created = await createAssignment(assignPayload);
+            const newId = created.data?.data?.id;
+            if (newId != null) keptIds.add(String(newId));
+          }
         }
 
-        const dupIds = duplicateAssignmentIds(contractId, keptId, assignments);
-        for (const dupId of dupIds) {
-          await deleteAssignment(dupId);
+        for (const row of existingRows) {
+          if (!keptIds.has(String(row.id))) {
+            await deleteAssignment(row.id);
+          }
         }
       }
 
@@ -512,11 +523,9 @@ const Contracts = () => {
     getPrimaryDriverNames(row.id, assignments, row.notes);
 
   const getAssignmentForContractModal = (contractId) => {
-    if (contractId == null) return null;
-    const rows = assignments.filter((a) => String(a.contract_id) === String(contractId));
-    const tableRow = pickPrimaryAssignment(rows);
+    if (contractId == null) return [];
     const contractRow = contracts.find((c) => String(c.id) === String(contractId));
-    return mergeAssignmentForEdit(tableRow, contractRow?.notes);
+    return getAssignmentsForContract(contractId, assignments, contractRow?.notes);
   };
 
   const filteredContracts = useMemo(() => {
@@ -1165,8 +1174,8 @@ const Contracts = () => {
         }}
         onSave={handleSaveContract}
         editingContract={editingContract}
-        initialAssignment={
-          editingContract?.id ? getAssignmentForContractModal(editingContract.id) : null
+        initialAssignments={
+          editingContract?.id ? getAssignmentForContractModal(editingContract.id) : []
         }
       />
       <TripSummaryModal

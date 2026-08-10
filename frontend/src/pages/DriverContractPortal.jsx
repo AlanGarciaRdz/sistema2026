@@ -288,6 +288,12 @@ const DriverContractPortal = () => {
 
   const c = portal?.contract;
   const assignedDriver = portal?.assignedDriver;
+  const assignedDrivers =
+    portal?.assignedDrivers?.length > 0
+      ? portal.assignedDrivers
+      : assignedDriver?.driver_name
+        ? [assignedDriver]
+        : [];
   const recentExpenses = portal?.recentExpenses || [];
   const recentPayments = portal?.recentPayments || [];
 
@@ -301,11 +307,16 @@ const DriverContractPortal = () => {
               <p className="text-blue-100 text-sm">Contrato</p>
               <h1 className="text-2xl font-bold break-words">{c?.contract_number}</h1>
               <p className="text-blue-100 mt-1">{c?.client_name || 'Cliente'}</p>
-              {assignedDriver?.driver_name && (
-                <p className="text-sm mt-2 flex items-center gap-1.5 font-medium text-white">
-                  <User size={16} className="shrink-0 opacity-90" aria-hidden />
-                  <span>Chofer: {assignedDriver.driver_name}</span>
-                </p>
+              {assignedDrivers.length > 0 && (
+                <div className="text-sm mt-2 font-medium text-white space-y-1">
+                  <p className="flex items-center gap-1.5">
+                    <User size={16} className="shrink-0 opacity-90" aria-hidden />
+                    <span>
+                      {assignedDrivers.length === 1 ? 'Chofer' : 'Choferes'}:{' '}
+                      {assignedDrivers.map((d) => d.driver_name).join(', ')}
+                    </span>
+                  </p>
+                </div>
               )}
               <p className="text-sm mt-2 opacity-90">
                 {c?.origin || '—'} → {c?.destination || '—'}

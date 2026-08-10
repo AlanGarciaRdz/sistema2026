@@ -4,6 +4,10 @@ import {
   NOTA_RESERVA_COTIZACION,
   getTerminosCotizacion
 } from './pdfTerminos';
+import {
+  serviceItemDisplayLabel,
+  parseServiceItemAmount
+} from './quoteServiceUtils';
 
 function formatMoney(valor) {
   const n = Number(valor);
@@ -152,17 +156,64 @@ function Cotizacion(doc, info) {
 
   y += 50;
 
+  const conceptItems = (info.serviceItems || []).filter((item) => parseServiceItemAmount(item) > 0);
+  const hasConcepts = info.quoteMode === 'concepts' && conceptItems.length > 0;
+  const serviceBoxH = hasConcepts
+    ? Math.max(120, 42 + conceptItems.length * 16 + 36)
+    : 130;
+
   doc.setDrawColor(...colors.primary);
   doc.setLineWidth(1.5);
   doc.setFillColor(...colors.white);
-  doc.roundedRect(15, y, 550, 130, 8, 8, 'FD');
+  doc.roundedRect(15, y, 550, serviceBoxH, 8, 8, 'FD');
 
   doc.setFontSize(8);
   doc.setTextColor(...colors.primary);
   doc.setFont('helvetica', 'bold');
-  doc.text(25, y + 14, 'SERVICIO DE TRANSPORTE');
+  doc.text(25, y + 14, hasConcepts ? 'SERVICIO COTIZADO' : 'SERVICIO DE TRANSPORTE');
   doc.setFont('helvetica', 'normal');
 
+  let dateY = y + 95;
+
+  if (hasConcepts) {
+    let rowY = y + 30;
+    conceptItems.forEach((item) => {
+      const label = serviceItemDisplayLabel(item);
+      const labelLines = doc.splitTextToSize(label, 380);
+      doc.setFontSize(8);
+      doc.setTextColor(...colors.dark);
+      doc.setFont('helvetica', 'normal');
+      doc.text(labelLines, 25, rowY);
+      doc.setFont('helvetica', 'bold');
+      doc.text(520, rowY, formatMoney(parseServiceItemAmount(item)), { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      rowY += Math.max(14, labelLines.length * 10);
+    });
+
+    dateY = Math.max(rowY + 8, y + serviceBoxH - 28);
+    doc.setFontSize(7);
+    doc.setTextColor(...colors.gray);
+    doc.text(25, dateY, 'FECHA(S) DEL SERVICIO');
+    doc.setFontSize(10);
+    doc.setTextColor(...colors.dark);
+    doc.setFont('helvetica', 'bold');
+    doc.text(25, dateY + 12, info.fechasServicio || 'Por definir');
+    doc.setFont('helvetica', 'normal');
+
+    if (info.unitType) {
+      doc.setFontSize(7);
+      doc.setTextColor(...colors.gray);
+      doc.text(330, dateY, 'UNIDAD');
+      doc.setFontSize(10);
+      doc.setTextColor(...colors.dark);
+      doc.setFont('helvetica', 'bold');
+      const unitLabel = info.capacity
+        ? `${info.unitType} · ${info.capacity} pasajeros`
+        : info.unitType;
+      doc.text(330, dateY + 12, unitLabel);
+      doc.setFont('helvetica', 'normal');
+    }
+  } else {
   doc.setFontSize(7);
   doc.setTextColor(...colors.gray);
   doc.text(25, y + 30, 'ORIGEN');
@@ -189,7 +240,7 @@ function Cotizacion(doc, info) {
   doc.setFont('helvetica', 'normal');
 
   const routeBottom = y + 48 + Math.max(originLines.length, destLines.length) * 18;
-  const dateY = Math.max(routeBottom + 8, y + 95);
+  dateY = Math.max(routeBottom + 8, y + 95);
 
   doc.setFontSize(7);
   doc.setTextColor(...colors.gray);
@@ -213,27 +264,70 @@ function Cotizacion(doc, info) {
     doc.text(330, dateY + 12, unitLabel);
     doc.setFont('helvetica', 'normal');
   }
+  }
 
-  y += 145;
+  y += serviceBoxH + 15;
+
+  const opciones =
+    info.opciones?.length > 0
+      ? info.opciones
+      : [
+          {
+            vehicleType: info.unitType,
+            capacity: info.capacity,
+            precio: info.precio,
+            anticipo20: info.anticipo20,
+            saldo80: info.saldo80
+          }
+        ];
+  const multiPrecio = opciones.length > 1;
+  const precioBoxH = multiPrecio ? 24 + opciones.length * 44 : 72;
 
   doc.setFillColor(...colors.primary);
-  doc.roundedRect(15, y, 550, 72, 8, 8, 'F');
+  doc.roundedRect(15, y, 550, precioBoxH, 8, 8, 'F');
 
   doc.setTextColor(199, 210, 254);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text(30, y + 18, 'PRECIO DEL SERVICIO');
+  doc.text(30, y + 16, multiPrecio ? 'PRECIOS DEL SERVICIO' : 'PRECIO DEL SERVICIO');
 
-  doc.setTextColor(...colors.white);
-  doc.setFontSize(28);
-  doc.text(30, y + 48, formatMoney(info.precio));
+  if (multiPrecio) {
+    let rowY = y + 30;
+    opciones.forEach((op) => {
+      const label = op.capacity
+        ? `${op.vehicleType} · ${op.capacity} pax`
+        : op.vehicleType || 'Unidad';
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(199, 210, 254);
+      doc.text(30, rowY, label);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...colors.white);
+      doc.text(320, rowY, formatMoney(op.precio), { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(199, 210, 254);
+      doc.text(
+        320,
+        rowY + 11,
+        `Anticipo 20%: ${formatMoney(op.anticipo20)} · Saldo al salir: ${formatMoney(op.saldo80)}`,
+        { align: 'right' }
+      );
+      rowY += 44;
+    });
+  } else {
+    const op = opciones[0];
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(28);
+    doc.text(30, y + 48, formatMoney(op.precio));
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(199, 210, 254);
+    doc.text(30, y + 62, 'MXN · precio total cotizado');
+  }
 
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(199, 210, 254);
-  doc.text(30, y + 62, 'MXN · precio total cotizado');
-
-  y += 82;
+  y += precioBoxH + 10;
 
   doc.setFillColor(220, 252, 231);
   doc.setDrawColor(...colors.success);
@@ -252,7 +346,7 @@ function Cotizacion(doc, info) {
   doc.setTextColor(...colors.dark);
   doc.text(reservaLines, 25, y + 22);
 
-  if (info.anticipo20 != null && info.saldo80 != null) {
+  if (info.anticipo20 != null && info.saldo80 != null && !multiPrecio) {
     doc.setFont('helvetica', 'bold');
     doc.text(25, y + reservaH - 9, `Anticipo 20%: ${formatMoney(info.anticipo20)}`);
     doc.text(280, y + reservaH - 9, `Saldo al salir: ${formatMoney(info.saldo80)}`);
@@ -260,6 +354,25 @@ function Cotizacion(doc, info) {
   }
 
   y += reservaH + 10;
+
+  const notaPersonal = String(info.pdfNote || '').trim();
+  if (notaPersonal) {
+    const notaLines = doc.splitTextToSize(notaPersonal, 520);
+    const notaH = Math.max(36, notaLines.length * 9 + 22);
+    doc.setFillColor(254, 252, 232);
+    doc.setDrawColor(234, 179, 8);
+    doc.setLineWidth(0.8);
+    doc.roundedRect(15, y, 550, notaH, 5, 5, 'FD');
+    doc.setFontSize(7);
+    doc.setTextColor(180, 120, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.text(25, y + 12, 'NOTA');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...colors.dark);
+    doc.text(notaLines, 25, y + 22);
+    y += notaH + 10;
+  }
 
   doc.setFontSize(7);
   doc.setTextColor(...colors.gray);
@@ -274,4 +387,8 @@ function Cotizacion(doc, info) {
   drawTerminosSection(doc, y, colors);
 }
 
-export default { Cotizacion };
+const exportedObject = {
+  Cotizacion
+};
+
+export default exportedObject;

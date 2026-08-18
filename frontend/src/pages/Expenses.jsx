@@ -41,6 +41,7 @@ const EXPENSE_TYPES = [
   { value: 'Gas', label: 'Gas' },
   { value: 'Google', label: 'Google' },
   { value: 'Impuestos', label: 'Impuestos' },
+  { value: 'IMSS', label: 'IMSS' },
   { value: 'Internet', label: 'Internet' },
   { value: 'Luz', label: 'Luz' },
   { value: 'Mantenimiento', label: 'Mantenimiento' },

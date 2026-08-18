@@ -33,6 +33,7 @@ import {
   formatDateWithWeekdayLocal,
   diffInclusiveCalendarDays
 } from '../utils/formatDateLocal';
+import { sortContractsByStartSchedule } from '../utils/contractScheduleSort';
 import {
   getPrimaryDriverNames,
   getAssignmentsForContract
@@ -529,7 +530,7 @@ const Contracts = () => {
   };
 
   const filteredContracts = useMemo(() => {
-    return contracts.filter((row) => {
+    const filtered = contracts.filter((row) => {
       const startStr = row.start_date ? String(row.start_date).slice(0, 10) : '';
       const endStr = row.end_date ? String(row.end_date).slice(0, 10) : startStr;
       if (filterFechaInicio && startStr && startStr < filterFechaInicio) return false;
@@ -554,6 +555,7 @@ const Contracts = () => {
       }
       return true;
     });
+    return sortContractsByStartSchedule(filtered);
   }, [
     contracts,
     filterFechaInicio,

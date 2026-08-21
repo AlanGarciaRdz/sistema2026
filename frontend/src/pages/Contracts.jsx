@@ -21,7 +21,7 @@ import Toast from '../components/Toast';
 import Modal from '../components/Modal';
 import Button from '../components/Button';
 import { Link } from 'react-router-dom';
-import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet, Calendar, RefreshCw } from 'lucide-react';
+import { FileDown, Copy, Eye, Link2, Share2, User, FileSpreadsheet, Calendar, RefreshCw, CircleDollarSign } from 'lucide-react';
 import {
   buildPdfInfoFromRow,
   generateContractPdf,
@@ -34,6 +34,7 @@ import {
   diffInclusiveCalendarDays
 } from '../utils/formatDateLocal';
 import { sortContractsByStartSchedule } from '../utils/contractScheduleSort';
+import { buildDriverPortalUrl } from '../utils/driverPortalUrl';
 import {
   getPrimaryDriverNames,
   getAssignmentsForContract
@@ -1055,7 +1056,7 @@ const Contracts = () => {
               <Eye size={18} />
             </button>
             <Link
-              to={driverPortalPath(row.contract_number)}
+              to={buildDriverPortalUrl(row.contract_number, { row })}
               target="_blank"
               rel="noopener noreferrer"
               className="text-indigo-600 hover:text-indigo-800 transition-colors p-1 inline-flex"
@@ -1063,6 +1064,22 @@ const Contracts = () => {
             >
               <Link2 size={18} />
             </Link>
+            {(() => {
+              const amountDue = getContractBillingAmounts(row).grandTotal;
+              const remaining = amountDue - getPaidAmount(row.id);
+              if (remaining <= 0.01) return null;
+              return (
+                <Link
+                  to={buildDriverPortalUrl(row.contract_number, { ingreso: true, row })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-green-600 hover:text-green-800 transition-colors p-1 inline-flex"
+                  title={`Registrar ingreso (falta ${formatCurrency(remaining)})`}
+                >
+                  <CircleDollarSign size={18} />
+                </Link>
+              );
+            })()}
             <button
               type="button"
               onClick={() => handleSyncCalendar(row)}

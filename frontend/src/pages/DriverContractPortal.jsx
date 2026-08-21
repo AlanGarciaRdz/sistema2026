@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getDriverPortal,
   postDriverPortalExpense,
@@ -13,7 +13,8 @@ import Toast from '../components/Toast';
 import { Truck, User, Pencil, Trash2, FileDown, Upload } from 'lucide-react';
 import { parseCasetasCsv } from '../utils/parseCasetasCsv';
 import { formatDateLocal } from '../utils/formatDateLocal';
-import { buildPdfInfoFromRow, generateContractPdf } from '../utils/contractPdfUtils';
+import { buildPdfInfoFromRow, generateContractPdf, getContractBillingAmounts } from '../utils/contractPdfUtils';
+import { resolvePortalUnitDisplay } from '../utils/driverPortalUrl';
 
 const PAYMENT_METHODS = [
   { value: 'Efectivo', label: 'Efectivo' },
@@ -45,6 +46,9 @@ const parseNotes = (raw) => {
 
 const DriverContractPortal = () => {
   const { contractNumber } = useParams();
+  const [searchParams] = useSearchParams();
+  const wantsIngreso = searchParams.get('ingreso') === '1';
+  const ingresoPrefilledRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [portal, setPortal] = useState(null);
   const [toast, setToast] = useState(null);
@@ -60,6 +64,8 @@ const DriverContractPortal = () => {
 
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('Efectivo');
+  const [payAccountId, setPayAccountId] = useState('');
+  const [payAccountSearch, setPayAccountSearch] = useState('');
   const [payDate, setPayDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [payNotes, setPayNotes] = useState('');
   const [savingPay, setSavingPay] = useState(false);
@@ -86,9 +92,35 @@ const DriverContractPortal = () => {
   };
 
   useEffect(() => {
+    ingresoPrefilledRef.current = false;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractNumber]);
+
+  useEffect(() => {
+    if (!wantsIngreso || !portal?.contract || ingresoPrefilledRef.current) return;
+
+    const c = portal.contract;
+    const amountDue = getContractBillingAmounts(c).grandTotal;
+    const paid = (portal.recentPayments || []).reduce(
+      (s, p) => s + (parseFloat(p.amount) || 0),
+      0
+    );
+    const remaining = Math.max(0, amountDue - paid);
+
+    if (remaining > 0) {
+      setPayAmount(Number(remaining.toFixed(2)).toString());
+    }
+
+    const serviceDate = c.start_date ? String(c.start_date).slice(0, 10) : '';
+    if (serviceDate) setPayDate(serviceDate);
+
+    ingresoPrefilledRef.current = true;
+
+    requestAnimationFrame(() => {
+      document.getElementById('registrar-ingreso')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [portal, wantsIngreso]);
 
   const formatCurrency = (n) =>
     new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n || 0);
@@ -107,6 +139,36 @@ const DriverContractPortal = () => {
     () => selectedCasetas.reduce((s, row) => s + row.amount, 0),
     [selectedCasetas]
   );
+
+  const paymentAccounts = portal?.paymentAccounts || [];
+
+  const filteredPayAccounts = useMemo(() => {
+    const q = payAccountSearch.trim().toLowerCase();
+    let list = paymentAccounts;
+    if (q) {
+      list = paymentAccounts.filter((a) => {
+        const blob = [a.account_name, a.account_code, a.bank_name, a.business_unit]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return blob.includes(q) || String(a.id).includes(q);
+      });
+    }
+    const opts = list.map((a) => ({
+      value: String(a.id),
+      label: `${a.account_name}${a.bank_name ? ` (${a.bank_name})` : ''}`
+    }));
+    if (payAccountId && !opts.some((o) => o.value === String(payAccountId))) {
+      const picked = paymentAccounts.find((a) => String(a.id) === String(payAccountId));
+      if (picked) {
+        opts.unshift({
+          value: String(picked.id),
+          label: `${picked.account_name}${picked.bank_name ? ` (${picked.bank_name})` : ''}`
+        });
+      }
+    }
+    return [{ value: '', label: '— Seleccionar cuenta —' }, ...opts];
+  }, [paymentAccounts, payAccountSearch, payAccountId]);
 
   const toggleCasetaRow = (key) => {
     setCasetasPreview((prev) =>
@@ -197,11 +259,14 @@ const DriverContractPortal = () => {
       await postDriverPortalPayment(contractNumber, {
         amount: parseFloat(payAmount),
         payment_method: payMethod,
+        payment_account_id: payAccountId || null,
         payment_date: payDate,
         notes: payNotes || null
       });
       setToast({ message: 'Ingreso registrado', type: 'success' });
       setPayAmount('');
+      setPayAccountId('');
+      setPayAccountSearch('');
       setPayNotes('');
       await load();
     } catch (err) {
@@ -296,6 +361,7 @@ const DriverContractPortal = () => {
         : [];
   const recentExpenses = portal?.recentExpenses || [];
   const recentPayments = portal?.recentPayments || [];
+  const unitDisplay = resolvePortalUnitDisplay(c, searchParams);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
@@ -321,6 +387,12 @@ const DriverContractPortal = () => {
               <p className="text-sm mt-2 opacity-90">
                 {c?.origin || '—'} → {c?.destination || '—'}
               </p>
+              {unitDisplay?.plate && (
+                <p className="text-sm mt-1 font-medium text-blue-100">
+                  Unidad: {unitDisplay.plate}
+                  {unitDisplay.unitType ? ` · ${unitDisplay.unitType}` : ''}
+                </p>
+              )}
             </div>
           </div>
           <button
@@ -532,10 +604,22 @@ const DriverContractPortal = () => {
           )}
         </section>
 
-        <section className="bg-white rounded-xl shadow border border-gray-200 p-5">
+        <section
+          id="registrar-ingreso"
+          className="bg-white rounded-xl shadow border border-gray-200 p-5"
+        >
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Registrar ingreso</h2>
+          {unitDisplay?.plate && wantsIngreso && (
+            <p className="text-sm text-gray-700 mb-3 rounded-lg bg-green-50 border border-green-100 px-3 py-2">
+              Unidad del contrato:{' '}
+              <span className="font-semibold">{unitDisplay.plate}</span>
+              {unitDisplay.unitType ? (
+                <span className="text-gray-600"> · {unitDisplay.unitType}</span>
+              ) : null}
+            </p>
+          )}
           <p className="text-sm text-gray-600 mb-4">
-            Indica cómo recibiste el dinero: efectivo, depósito o transferencia.
+            Indica cómo recibiste el dinero y en qué cuenta quedó registrado (transferencia, depósito o tarjeta).
           </p>
           <form onSubmit={onSubmitPayment} className="space-y-4">
             <div>
@@ -561,6 +645,27 @@ const DriverContractPortal = () => {
                 {PAYMENT_METHODS.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Cuenta bancaria</label>
+              <input
+                type="text"
+                value={payAccountSearch}
+                onChange={(e) => setPayAccountSearch(e.target.value)}
+                placeholder="Buscar cuenta, banco…"
+                className="w-full min-h-[44px] text-sm border border-gray-300 rounded-lg px-3 py-2 mb-2"
+              />
+              <select
+                value={payAccountId}
+                onChange={(e) => setPayAccountId(e.target.value)}
+                className="w-full min-h-[48px] text-base border border-gray-300 rounded-lg px-3 py-2"
+              >
+                {filteredPayAccounts.map((opt) => (
+                  <option key={opt.value || 'empty'} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
               </select>
@@ -671,7 +776,10 @@ const DriverContractPortal = () => {
                 >
                   <span>
                     <span className="font-medium text-green-700">{p.payment_method || 'Ingreso'}</span>
-                    <span className="text-gray-500 block text-xs">{formatDate(p.payment_date)}</span>
+                    <span className="text-gray-500 block text-xs">
+                      {formatDate(p.payment_date)}
+                      {p.account_name ? ` · ${p.account_name}` : ''}
+                    </span>
                   </span>
                   <span className="font-semibold shrink-0">{formatCurrency(p.amount)}</span>
                 </li>

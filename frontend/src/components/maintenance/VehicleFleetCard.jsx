@@ -22,6 +22,22 @@ const statusBadge = (status) => {
   return 'bg-orange-100 text-orange-800';
 };
 
+const daysSinceDate = (value) => {
+  if (!value) return null;
+  const dateOnly = String(value).slice(0, 10);
+  const match = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const readingDay = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3])
+  );
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.floor((today - readingDay) / 86400000));
+};
+
 const VehicleFleetCard = ({
   vehicle,
   onSaveMileage,
@@ -66,6 +82,7 @@ const VehicleFleetCard = ({
 
   const recentMaintenance = vehicle.recent_maintenance || [];
   const recentReports = vehicle.recent_incident_reports || [];
+  const daysWithoutMileageUpdate = daysSinceDate(vehicle.current_mileage_at);
   const showIncidents = Boolean(onAddIncidentReport);
   const hasHistory =
     recentMaintenance.length > 0 || (showIncidents && recentReports.length > 0);
@@ -94,6 +111,11 @@ const VehicleFleetCard = ({
       )}
 
       <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-3">
+        {daysWithoutMileageUpdate > 5 && (
+          <p className="w-full rounded-md bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900">
+            {daysWithoutMileageUpdate} días sin actualizar el odómetro.
+          </p>
+        )}
         <div className="min-w-[120px] flex-1">
           <label className="mb-1 block text-xs font-medium text-gray-600">
             Km actual (odómetro)

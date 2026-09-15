@@ -81,25 +81,56 @@ const clearContractAssignmentNotesIfEmpty = async (contractId, excludeAssignment
   ]);
 };
 
-const syncAssignmentToContractNotes = async (
-  contract_id,
-  driver_id,
-  vehicle_id,
-  assigned_date,
-  driving_date
-) => {
+const syncAllAssignmentsToContractNotes = async (contractId) => {
+  if (!contractId) return;
   try {
-    const block = await buildAssignmentNotesBlock(
-      contract_id,
-      driver_id,
-      vehicle_id,
-      assigned_date,
-      driving_date
+    const res = await pool.query(
+      `SELECT a.id, a.contract_id, a.driver_id, a.vehicle_id, a.assigned_date, a.driving_date,
+              d.name AS driver_name, v.vehicle_code, v.license_plate
+       FROM assignments a
+       LEFT JOIN drivers d ON a.driver_id = d.id
+       LEFT JOIN vehicles v ON a.vehicle_id = v.id
+       WHERE a.contract_id = $1
+       ORDER BY a.driving_date DESC NULLS LAST, a.id DESC`,
+      [contractId]
     );
-    await mergeContractNotesWithAssignment(contract_id, block);
+
+    const contractRes = await pool.query('SELECT notes FROM contracts WHERE id = $1', [contractId]);
+    const existingNotesJson = safeJsonParse(contractRes.rows[0]?.notes);
+    const merged = {
+      ...(existingNotesJson && typeof existingNotesJson === 'object' ? existingNotesJson : {})
+    };
+
+    if (res.rows.length) {
+      const blocks = res.rows.map((row) => ({
+        id: row.id,
+        contract_id: contractId,
+        driver_id: row.driver_id,
+        driver_name: row.driver_name,
+        vehicle_id: row.vehicle_id,
+        vehicle_code: row.vehicle_code,
+        license_plate: row.license_plate,
+        assigned_date: row.assigned_date,
+        driving_date: row.driving_date
+      }));
+      merged.assignment = blocks[0];
+      merged.assignments = blocks;
+    } else {
+      delete merged.assignment;
+      delete merged.assignments;
+    }
+
+    const nextNotesText = safeJsonStringify(merged);
+    if (nextNotesText) {
+      await pool.query('UPDATE contracts SET notes = $1 WHERE id = $2', [nextNotesText, contractId]);
+    }
   } catch (e) {
-    console.error('Warning: could not update contract notes with assignment:', e.message);
+    console.error('Warning: could not sync contract notes with assignments:', e.message);
   }
+};
+
+const syncAssignmentToContractNotes = async (contract_id) => {
+  await syncAllAssignmentsToContractNotes(contract_id);
 };
 
 // Get all assignments
@@ -181,13 +212,7 @@ const createAssignment = async (req, res) => {
       [contract_id, driver_id, vehicle_id, assigned_date, driving_date, external_company_id, notes]
     );
 
-    await syncAssignmentToContractNotes(
-      contract_id,
-      driver_id,
-      vehicle_id,
-      assigned_date,
-      driving_date
-    );
+    await syncAssignmentToContractNotes(contract_id);
 
     const joined = await pool.query(
       `SELECT
@@ -242,16 +267,10 @@ const updateAssignment = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Assignment not found' });
     }
 
-    await syncAssignmentToContractNotes(
-      contract_id,
-      driver_id,
-      vehicle_id,
-      assigned_date,
-      driving_date
-    );
+    await syncAssignmentToContractNotes(contract_id);
 
     if (prevContractId && String(prevContractId) !== String(contract_id)) {
-      await clearContractAssignmentNotesIfEmpty(prevContractId, parseInt(id, 10));
+      await syncAllAssignmentsToContractNotes(prevContractId);
     }
 
     const joined = await pool.query(
@@ -294,7 +313,7 @@ const deleteAssignment = async (req, res) => {
 
     const deleted = result.rows[0];
     if (deleted.contract_id) {
-      await clearContractAssignmentNotesIfEmpty(deleted.contract_id);
+      await syncAllAssignmentsToContractNotes(deleted.contract_id);
     }
 
     res.json({ success: true, message: 'Assignment deleted successfully' });

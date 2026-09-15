@@ -12,6 +12,29 @@ const PAYMENT_METHODS = [
   'Tarjeta'
 ];
 
+/** Valida cuenta activa; devuelve id y unidad de negocio. */
+const resolvePaymentAccountId = async (payment_account_id) => {
+  if (payment_account_id == null || payment_account_id === '') {
+    return { accountId: null, businessUnit: null };
+  }
+  const parsed = parseInt(payment_account_id, 10);
+  if (!Number.isFinite(parsed)) {
+    return { error: 'Cuenta bancaria no válida' };
+  }
+  const acc = await pool.query(
+    `SELECT id, business_unit FROM payment_accounts
+     WHERE id = $1 AND (status IS NULL OR status = 'Active')`,
+    [parsed]
+  );
+  if (acc.rows.length === 0) {
+    return { error: 'Cuenta bancaria no encontrada' };
+  }
+  return {
+    accountId: parsed,
+    businessUnit: acc.rows[0].business_unit || null
+  };
+};
+
 const getContractByNumber = async (contractNumber) => {
   const r = await pool.query(
     `SELECT co.*,
@@ -34,7 +57,7 @@ const isDriverPortalExpense = (notes) => {
   }
 };
 
-const resolveAssignedDriver = async (contract) => {
+const resolveAssignedDrivers = async (contract) => {
   const assignmentResult = await pool.query(
     `SELECT a.id, a.driver_id, a.driving_date, a.assigned_date,
             d.name AS driver_name,
@@ -43,37 +66,53 @@ const resolveAssignedDriver = async (contract) => {
      LEFT JOIN drivers d ON a.driver_id = d.id
      LEFT JOIN vehicles v ON a.vehicle_id = v.id
      WHERE a.contract_id = $1
-     ORDER BY a.driving_date DESC NULLS LAST, a.id DESC
-     LIMIT 1`,
+     ORDER BY a.driving_date DESC NULLS LAST, d.name ASC NULLS LAST, a.id ASC`,
     [contract.id]
   );
 
-  const row = assignmentResult.rows[0];
-  if (row?.driver_name) {
-    return {
+  const rows = assignmentResult.rows.filter((row) => row.driver_name);
+  if (rows.length) {
+    return rows.map((row) => ({
       driver_name: row.driver_name,
       vehicle_code: row.vehicle_code,
       license_plate: row.license_plate,
       driving_date: row.driving_date
-    };
+    }));
   }
 
   try {
     const notes = typeof contract.notes === 'string' ? JSON.parse(contract.notes || '{}') : {};
+    if (Array.isArray(notes.assignments) && notes.assignments.length) {
+      return notes.assignments
+        .filter((a) => a?.driver_name)
+        .map((a) => ({
+          driver_name: a.driver_name,
+          vehicle_code: a.vehicle_code || null,
+          license_plate: a.license_plate || null,
+          driving_date: a.driving_date || null
+        }));
+    }
     const a = notes?.assignment;
     if (a?.driver_name) {
-      return {
-        driver_name: a.driver_name,
-        vehicle_code: a.vehicle_code || null,
-        license_plate: a.license_plate || null,
-        driving_date: a.driving_date || null
-      };
+      return [
+        {
+          driver_name: a.driver_name,
+          vehicle_code: a.vehicle_code || null,
+          license_plate: a.license_plate || null,
+          driving_date: a.driving_date || null
+        }
+      ];
     }
   } catch {
     /* ignore */
   }
 
-  return null;
+  return [];
+};
+
+const resolveAssignedDriver = async (contract) => {
+  const drivers = await resolveAssignedDrivers(contract);
+  return drivers[0] || null;
 };
 
 const getDriverPortal = async (req, res) => {
@@ -85,6 +124,7 @@ const getDriverPortal = async (req, res) => {
     }
 
     const assignedDriver = await resolveAssignedDriver(contract);
+    const assignedDrivers = await resolveAssignedDrivers(contract);
 
     const expensesResult = await pool.query(
       `SELECT e.id, e.expense_type, e.amount, e.expense_date, e.notes, e.validation_status,
@@ -107,13 +147,22 @@ const getDriverPortal = async (req, res) => {
       [contract.id]
     );
 
+    const accountsResult = await pool.query(
+      `SELECT id, account_code, account_name, bank_name, business_unit
+       FROM payment_accounts
+       WHERE status IS NULL OR status = 'Active'
+       ORDER BY account_code`
+    );
+
     res.json({
       success: true,
       data: {
         contract,
         assignedDriver,
+        assignedDrivers,
         recentExpenses: expensesResult.rows,
-        recentPayments: paymentsResult.rows
+        recentPayments: paymentsResult.rows,
+        paymentAccounts: accountsResult.rows
       }
     });
   } catch (error) {
@@ -130,7 +179,8 @@ const postDriverExpense = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
     }
 
-    const { expense_type, amount, expense_date, notes, payment_method } = req.body;
+    const { expense_type, amount, expense_date, notes, payment_method, payment_account_id } =
+      req.body;
     if (!expense_type || amount == null || amount === '') {
       return res.status(400).json({ success: false, error: 'Tipo y monto son obligatorios' });
     }
@@ -138,6 +188,13 @@ const postDriverExpense = async (req, res) => {
     if (!PAYMENT_METHODS.includes(method)) {
       return res.status(400).json({ success: false, error: 'Forma de pago no válida' });
     }
+
+    const accountResolved = await resolvePaymentAccountId(payment_account_id);
+    if (accountResolved.error) {
+      return res.status(400).json({ success: false, error: accountResolved.error });
+    }
+    const { accountId, businessUnit } = accountResolved;
+    const validationStatus = accountId ? 'approved' : 'pending';
 
     const expenseNotes = JSON.stringify({
       driver_portal: true,
@@ -149,14 +206,17 @@ const postDriverExpense = async (req, res) => {
       `INSERT INTO expenses (
         contract_id, expense_type, amount, payment_account_id,
         business_unit, expense_date, notes, validation_status, driver_payment_method
-      ) VALUES ($1, $2, $3, NULL, NULL, $4, $5, 'pending', $6)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
       [
         contract.id,
         expense_type,
         parseFloat(amount),
+        accountId,
+        businessUnit,
         expense_date || new Date().toISOString().slice(0, 10),
         expenseNotes,
+        validationStatus,
         method
       ]
     );
@@ -191,11 +251,19 @@ const putDriverExpense = async (req, res) => {
       });
     }
 
-    const { expense_type, amount, expense_date, notes, payment_method } = req.body;
+    const { expense_type, amount, expense_date, notes, payment_method, payment_account_id } =
+      req.body;
     const method = payment_method || 'Efectivo';
     if (!PAYMENT_METHODS.includes(method)) {
       return res.status(400).json({ success: false, error: 'Forma de pago no válida' });
     }
+
+    const accountResolved = await resolvePaymentAccountId(payment_account_id);
+    if (accountResolved.error) {
+      return res.status(400).json({ success: false, error: accountResolved.error });
+    }
+    const { accountId, businessUnit } = accountResolved;
+    const validationStatus = accountId ? 'approved' : 'pending';
 
     const expenseNotes = JSON.stringify({
       driver_portal: true,
@@ -210,8 +278,11 @@ const putDriverExpense = async (req, res) => {
         expense_date = $3,
         notes = $4,
         driver_payment_method = $5,
+        payment_account_id = $6,
+        business_unit = $7,
+        validation_status = $8,
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6 AND contract_id = $7 AND validation_status = 'pending'
+       WHERE id = $9 AND contract_id = $10 AND validation_status = 'pending'
        RETURNING *`,
       [
         expense_type,
@@ -219,6 +290,9 @@ const putDriverExpense = async (req, res) => {
         expense_date || row.expense_date,
         expenseNotes,
         method,
+        accountId,
+        businessUnit,
+        validationStatus,
         expenseId,
         contract.id
       ]
@@ -287,7 +361,7 @@ const postDriverExpensesBulk = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
     }
 
-    const { items, payment_method } = req.body;
+    const { items, payment_method, payment_account_id } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, error: 'No hay gastos para importar' });
     }
@@ -296,6 +370,13 @@ const postDriverExpensesBulk = async (req, res) => {
     if (!PAYMENT_METHODS.includes(method)) {
       return res.status(400).json({ success: false, error: 'Forma de pago no válida' });
     }
+
+    const accountResolved = await resolvePaymentAccountId(payment_account_id);
+    if (accountResolved.error) {
+      return res.status(400).json({ success: false, error: accountResolved.error });
+    }
+    const { accountId, businessUnit } = accountResolved;
+    const validationStatus = accountId ? 'approved' : 'pending';
 
     const existingRes = await pool.query(
       `SELECT notes FROM expenses WHERE contract_id = $1`,
@@ -337,14 +418,17 @@ const postDriverExpensesBulk = async (req, res) => {
         `INSERT INTO expenses (
           contract_id, expense_type, amount, payment_account_id,
           business_unit, expense_date, notes, validation_status, driver_payment_method
-        ) VALUES ($1, $2, $3, NULL, NULL, $4, $5, 'pending', $6)
-        RETURNING id, expense_type, amount, expense_date, validation_status`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, expense_type, amount, expense_date, validation_status, payment_account_id`,
         [
           contract.id,
           item.expense_type,
           amount,
+          accountId,
+          businessUnit,
           item.expense_date || new Date().toISOString().slice(0, 10),
           expenseNotes,
+          validationStatus,
           method
         ]
       );
@@ -373,7 +457,7 @@ const postDriverPayment = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Contrato no encontrado' });
     }
 
-    const { amount, payment_date, notes, payment_method } = req.body;
+    const { amount, payment_date, notes, payment_method, payment_account_id } = req.body;
     if (amount == null || amount === '') {
       return res.status(400).json({ success: false, error: 'Monto obligatorio' });
     }
@@ -381,6 +465,12 @@ const postDriverPayment = async (req, res) => {
     if (!PAYMENT_METHODS.includes(method)) {
       return res.status(400).json({ success: false, error: 'Forma de pago no válida' });
     }
+
+    const accountResolved = await resolvePaymentAccountId(payment_account_id);
+    if (accountResolved.error) {
+      return res.status(400).json({ success: false, error: accountResolved.error });
+    }
+    const { accountId } = accountResolved;
 
     const payNotes = JSON.stringify({
       driver_portal: true,
@@ -392,7 +482,7 @@ const postDriverPayment = async (req, res) => {
       `INSERT INTO payments (
         contract_id, contract_number, payment_type, amount, payment_method,
         payment_account_id, payment_date, notes
-      ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *`,
       [
         contract.id,
@@ -400,6 +490,7 @@ const postDriverPayment = async (req, res) => {
         'Parcial',
         parseFloat(amount),
         method,
+        accountId,
         payment_date || new Date().toISOString().slice(0, 10),
         payNotes
       ]

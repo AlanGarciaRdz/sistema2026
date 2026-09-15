@@ -703,11 +703,65 @@ const deleteContract = async (req, res) => {
   }
 };
 
+const ALLOWED_CONTRACT_STATUSES = [
+  'Cotización enviada',
+  'Orden de compra',
+  'Factura enviada',
+  'Agendado',
+  'En proceso',
+  'Realizado',
+  'Por cobrar',
+  'Por pagar',
+  'Cancelado'
+];
+
+/**
+ * PATCH /contracts/bulk-status
+ * Body: { ids: number[], status: string }
+ */
+const bulkUpdateContractStatus = async (req, res) => {
+  try {
+    const { ids, status } = req.body || {};
+    const idList = Array.isArray(ids)
+      ? [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+
+    if (idList.length === 0) {
+      return res.status(400).json({ success: false, error: 'Se requiere al menos un id de contrato' });
+    }
+    if (!status || !ALLOWED_CONTRACT_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Estado inválido. Use uno de: ${ALLOWED_CONTRACT_STATUSES.join(', ')}`
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE contracts
+       SET status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($2::int[])
+       RETURNING id, contract_number, status`,
+      [status, idList]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows,
+      updated: result.rowCount,
+      requested: idList.length
+    });
+  } catch (error) {
+    console.error('Error bulk updating contract status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getAllContracts,
   getContractById,
   createContract,
   updateContract,
+  bulkUpdateContractStatus,
   syncContractCalendar,
   deleteContract
 };

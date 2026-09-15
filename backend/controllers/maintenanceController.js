@@ -1,6 +1,9 @@
 const pool = require('../config/db');
+const { addDays } = require('../utils/maintenanceStatus');
+const { ensureServiceTimeColumns } = require('../utils/ensureServiceTimeColumns');
 
 async function syncAfterMaintenanceRecord(maintenance, body) {
+  await ensureServiceTimeColumns();
   const vehicleId = body.vehicle_id ?? maintenance.vehicle_id;
   const km = body.mileage != null && body.mileage !== '' ? parseInt(body.mileage, 10) : null;
   const dateStr = (body.maintenance_date || maintenance.maintenance_date || '')
@@ -22,11 +25,27 @@ async function syncAfterMaintenanceRecord(maintenance, body) {
   if (!serviceItemId) return;
 
   const itemRes = await pool.query(
-    'SELECT interval_km, item_kind FROM vehicle_service_items WHERE id = $1',
+    `SELECT interval_km, item_kind, schedule_basis, interval_days
+     FROM vehicle_service_items WHERE id = $1`,
     [serviceItemId]
   );
   const item = itemRes.rows[0];
   if (!item) return;
+
+  if (String(item.schedule_basis || 'km').toLowerCase() === 'days') {
+    const intervalDays = parseInt(item.interval_days, 10);
+    const nextDueDate =
+      Number.isFinite(intervalDays) && intervalDays > 0 ? addDays(dateStr, intervalDays) : null;
+    await pool.query(
+      `UPDATE vehicle_service_items SET
+         last_service_date = COALESCE($1, last_service_date),
+         next_due_date = COALESCE($2, next_due_date),
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [dateStr || null, nextDueDate, serviceItemId]
+    );
+    return;
+  }
 
   let nextDue =
     body.next_service_km != null && body.next_service_km !== ''

@@ -2,8 +2,14 @@ const pool = require('../config/db');
 const {
   computeKmServiceStatus,
   computeIntervalProgress,
-  resolveEffectiveMileage
+  computeDaysServiceStatus,
+  computeDaysIntervalProgress,
+  resolveNextDueDate,
+  resolveEffectiveMileage,
+  toDateOnly,
+  sortServiceItemsByPriority
 } = require('../utils/maintenanceStatus');
+const { ensureServiceTimeColumns } = require('../utils/ensureServiceTimeColumns');
 
 async function queryRowsSafe(queryText, params, label) {
   try {
@@ -13,6 +19,56 @@ async function queryRowsSafe(queryText, params, label) {
     console.warn(`[fleetMaintenance] ${label}:`, error.message);
     return [];
   }
+}
+
+const isFrontTireItem = (row) =>
+  row?.item_kind === 'tires_front' || /delanter/i.test(String(row?.title || ''));
+
+const isRearTireItem = (row) =>
+  row?.item_kind === 'tires_rear' || /traser/i.test(String(row?.title || ''));
+
+/** Si la unidad tiene llantas delanteras programadas, crea llantas traseras con los mismos km. */
+async function ensureRearTireServiceItems(itemRows) {
+  if (!itemRows?.length) return itemRows;
+
+  const byVehicle = new Map();
+  for (const row of itemRows) {
+    const list = byVehicle.get(row.vehicle_id) || [];
+    list.push(row);
+    byVehicle.set(row.vehicle_id, list);
+  }
+
+  const inserted = [];
+  for (const [vehicleId, items] of byVehicle) {
+    if (!items.some(isFrontTireItem) || items.some(isRearTireItem)) continue;
+
+    const front = items.find(isFrontTireItem);
+    try {
+      const result = await pool.query(
+        `INSERT INTO vehicle_service_items (
+          vehicle_id, title, item_kind, next_due_km, warn_before_km, critical_before_km,
+          interval_km, last_service_km, last_service_date, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+        RETURNING *`,
+        [
+          vehicleId,
+          'Llantas traseras',
+          'tires_rear',
+          front.next_due_km ?? null,
+          front.warn_before_km ?? 5000,
+          front.critical_before_km ?? 2000,
+          front.interval_km ?? 40000,
+          front.last_service_km ?? null,
+          front.last_service_date ?? null
+        ]
+      );
+      if (result.rows[0]) inserted.push(result.rows[0]);
+    } catch (error) {
+      console.warn('[fleetMaintenance] ensureRearTireServiceItems:', error.message);
+    }
+  }
+
+  return inserted.length ? [...itemRows, ...inserted] : itemRows;
 }
 
 async function bumpVehicleMileageIfHigher(vehicleId, km, dateStr) {
@@ -109,7 +165,53 @@ async function logOdometerReadingToHistory(vehicleId, km, dateStr) {
   return true;
 }
 
+function parseOptionalInt(value) {
+  if (value == null || value === '') return null;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 const mapServiceItemRow = (row, effectiveKm) => {
+  const isDays = String(row.schedule_basis || 'km').toLowerCase() === 'days';
+  if (isDays) {
+    const nextDueDate = resolveNextDueDate(row);
+    const st = computeDaysServiceStatus(
+      nextDueDate,
+      row.warn_before_days,
+      row.critical_before_days
+    );
+    const interval = computeDaysIntervalProgress(
+      row.last_service_date,
+      nextDueDate,
+      row.interval_days
+    );
+    return {
+      id: row.id,
+      vehicle_id: row.vehicle_id,
+      title: row.title,
+      item_kind: row.item_kind,
+      schedule_basis: 'days',
+      interval_days: row.interval_days,
+      warn_before_days: row.warn_before_days,
+      critical_before_days: row.critical_before_days,
+      next_due_date: nextDueDate,
+      last_service_date: toDateOnly(row.last_service_date),
+      notes: row.notes,
+      is_active: row.is_active,
+      status: st.status,
+      days_remaining: st.daysRemaining,
+      interval_progress_pct: interval.percent,
+      interval_consumed_days: interval.consumedDays,
+      interval_total_days: interval.totalDays,
+      next_due_km: null,
+      warn_before_km: null,
+      critical_before_km: null,
+      interval_km: null,
+      last_service_km: row.last_service_km,
+      km_remaining: null
+    };
+  }
+
   const st = computeKmServiceStatus(
     effectiveKm,
     row.next_due_km,
@@ -136,6 +238,7 @@ const mapServiceItemRow = (row, effectiveKm) => {
     vehicle_id: row.vehicle_id,
     title: row.title,
     item_kind: row.item_kind,
+    schedule_basis: 'km',
     next_due_km: row.next_due_km,
     warn_before_km: row.warn_before_km,
     critical_before_km: row.critical_before_km,
@@ -157,6 +260,7 @@ const mapServiceItemRow = (row, effectiveKm) => {
 
 const getFleetOverview = async (req, res) => {
   try {
+    await ensureServiceTimeColumns();
     const vehiclesResult = await pool.query(`
       SELECT id, vehicle_code, brand, model, license_plate, fuel_type, status,
              current_mileage, current_mileage_at
@@ -165,12 +269,14 @@ const getFleetOverview = async (req, res) => {
       ORDER BY vehicle_code NULLS LAST, license_plate
     `);
 
-    const itemRows = await queryRowsSafe(
+    const itemRows = await ensureRearTireServiceItems(
+      await queryRowsSafe(
       `SELECT * FROM vehicle_service_items
        WHERE is_active = TRUE
        ORDER BY vehicle_id, title`,
       [],
       'vehicle_service_items'
+      )
     );
 
     const maintenanceRows = await queryRowsSafe(
@@ -221,7 +327,9 @@ const getFleetOverview = async (req, res) => {
       const recent = maintByVehicle.get(v.id) || [];
       const recentIncidents = incidentsByVehicle.get(v.id) || [];
       const mileage = resolveEffectiveMileage(v.current_mileage, rawItems, recent);
-      const serviceItems = rawItems.map((row) => mapServiceItemRow(row, mileage.effectiveKm));
+      const serviceItems = sortServiceItemsByPriority(
+        rawItems.map((row) => mapServiceItemRow(row, mileage.effectiveKm))
+      );
       const worst = serviceItems.reduce((acc, it) => {
         const rank = { unknown: 0, ok: 1, warning: 2, critical: 3, overdue: 4 };
         return rank[it.status] > rank[acc] ? it.status : acc;
@@ -297,34 +405,66 @@ const updateVehicleMileage = async (req, res) => {
 
 const createServiceItem = async (req, res) => {
   try {
+    await ensureServiceTimeColumns();
     const {
       vehicle_id,
       title,
       item_kind,
+      schedule_basis,
       next_due_km,
       warn_before_km,
       critical_before_km,
       interval_km,
+      interval_days,
+      warn_before_days,
+      critical_before_days,
+      next_due_date,
       last_service_km,
       last_service_date,
       notes
     } = req.body;
 
+    const isDays = String(schedule_basis || 'km').toLowerCase() === 'days';
+    const intervalDays = parseOptionalInt(interval_days);
+    const dueDate = isDays
+      ? resolveNextDueDate({
+          last_service_date,
+          interval_days: intervalDays,
+          next_due_date
+        })
+      : null;
+    if (isDays && (!intervalDays || intervalDays <= 0)) {
+      return res.status(400).json({ success: false, error: 'Indica el intervalo en días' });
+    }
+    if (isDays && !dueDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Indica la fecha del último servicio para calcular el próximo'
+      });
+    }
+
     const result = await pool.query(
       `INSERT INTO vehicle_service_items (
-        vehicle_id, title, item_kind, next_due_km, warn_before_km, critical_before_km,
-        interval_km, last_service_km, last_service_date, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        vehicle_id, title, item_kind, schedule_basis,
+        next_due_km, warn_before_km, critical_before_km, interval_km,
+        interval_days, warn_before_days, critical_before_days, next_due_date,
+        last_service_km, last_service_date, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *`,
       [
         vehicle_id,
         title,
         item_kind || 'custom',
-        next_due_km ?? null,
-        warn_before_km ?? 5000,
-        critical_before_km ?? 2000,
-        interval_km ?? null,
-        last_service_km ?? null,
+        isDays ? 'days' : 'km',
+        isDays ? null : next_due_km ?? null,
+        isDays ? null : warn_before_km ?? 5000,
+        isDays ? null : critical_before_km ?? 2000,
+        isDays ? null : interval_km ?? null,
+        isDays ? intervalDays : null,
+        isDays ? parseOptionalInt(warn_before_days) ?? 14 : null,
+        isDays ? parseOptionalInt(critical_before_days) ?? 7 : null,
+        dueDate,
+        isDays ? null : last_service_km ?? null,
         last_service_date || null,
         notes || null
       ]
@@ -355,6 +495,7 @@ const createServiceItem = async (req, res) => {
 
 const updateServiceItem = async (req, res) => {
   try {
+    await ensureServiceTimeColumns();
     const { id } = req.params;
     const prevRes = await pool.query('SELECT * FROM vehicle_service_items WHERE id = $1', [id]);
     if (!prevRes.rows.length) {
@@ -365,39 +506,73 @@ const updateServiceItem = async (req, res) => {
     const {
       title,
       item_kind,
+      schedule_basis,
       next_due_km,
       warn_before_km,
       critical_before_km,
       interval_km,
+      interval_days,
+      warn_before_days,
+      critical_before_days,
+      next_due_date,
       last_service_km,
       last_service_date,
       notes,
       is_active
     } = req.body;
 
+    const isDays = String(schedule_basis || prev.schedule_basis || 'km').toLowerCase() === 'days';
+    const intervalDays = parseOptionalInt(interval_days);
+    const dueDate = isDays
+      ? resolveNextDueDate({
+          last_service_date,
+          interval_days: intervalDays,
+          next_due_date
+        })
+      : null;
+    if (isDays && (!intervalDays || intervalDays <= 0)) {
+      return res.status(400).json({ success: false, error: 'Indica el intervalo en días' });
+    }
+    if (isDays && !dueDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Indica la fecha del último servicio para calcular el próximo'
+      });
+    }
+
     const result = await pool.query(
       `UPDATE vehicle_service_items SET
         title = COALESCE($1, title),
         item_kind = COALESCE($2, item_kind),
-        next_due_km = $3,
-        warn_before_km = COALESCE($4, warn_before_km),
-        critical_before_km = COALESCE($5, critical_before_km),
-        interval_km = $6,
-        last_service_km = $7,
-        last_service_date = $8,
-        notes = $9,
-        is_active = COALESCE($10, is_active),
+        schedule_basis = $3,
+        next_due_km = $4,
+        warn_before_km = $5,
+        critical_before_km = $6,
+        interval_km = $7,
+        interval_days = $8,
+        warn_before_days = $9,
+        critical_before_days = $10,
+        next_due_date = $11,
+        last_service_km = $12,
+        last_service_date = $13,
+        notes = $14,
+        is_active = COALESCE($15, is_active),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $11
+      WHERE id = $16
       RETURNING *`,
       [
         title,
         item_kind,
-        next_due_km ?? null,
-        warn_before_km,
-        critical_before_km,
-        interval_km ?? null,
-        last_service_km ?? null,
+        isDays ? 'days' : 'km',
+        isDays ? null : next_due_km ?? null,
+        isDays ? null : warn_before_km ?? 5000,
+        isDays ? null : critical_before_km ?? 2000,
+        isDays ? null : interval_km ?? null,
+        isDays ? intervalDays : null,
+        isDays ? parseOptionalInt(warn_before_days) ?? 14 : null,
+        isDays ? parseOptionalInt(critical_before_days) ?? 7 : null,
+        dueDate,
+        isDays ? null : last_service_km ?? null,
         last_service_date || null,
         notes,
         is_active,

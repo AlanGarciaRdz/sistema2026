@@ -5,7 +5,7 @@ import {
   STATUS_STYLES,
   STATUS_LABELS,
   formatKm,
-  INCIDENT_TYPE_LABELS,
+  sortServiceItemsByPriority,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS
 } from '../../utils/maintenanceStatus';
@@ -28,11 +28,7 @@ const daysSinceDate = (value) => {
   const match = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
 
-  const readingDay = Date.UTC(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3])
-  );
+  const readingDay = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   const now = new Date();
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.max(0, Math.floor((today - readingDay) / 86400000));
@@ -86,124 +82,136 @@ const VehicleFleetCard = ({
   const showIncidents = Boolean(onAddIncidentReport);
   const hasHistory =
     recentMaintenance.length > 0 || (showIncidents && recentReports.length > 0);
+  const sortedItems = sortServiceItemsByPriority(vehicle.service_items || []);
 
   return (
     <div className={`rounded-xl border bg-white p-4 shadow-sm ring-1 ${fleetStyle.ring}`}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">{label}</h3>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 shrink-0 lg:w-56">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-semibold text-gray-900">{label}</h3>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${fleetStyle.badge}`}>
+              {STATUS_LABELS[vehicle.fleet_status]}
+            </span>
+          </div>
           <p className="text-sm text-gray-500">
             {vehicle.license_plate && <span className="mr-2">{vehicle.license_plate}</span>}
             {vehicle.brand} {vehicle.model}
           </p>
+          {vehicle.effective_mileage != null && (
+            <p className="mt-1 text-xs text-gray-500">
+              Odómetro efectivo: <strong>{formatKm(vehicle.effective_mileage)}</strong> km
+            </p>
+          )}
         </div>
-        <span className={`rounded-full px-2 py-1 text-xs font-medium ${fleetStyle.badge}`}>
-          {STATUS_LABELS[vehicle.fleet_status]}
-        </span>
-      </div>
 
-      {vehicle.mileage_stale && (
-        <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          El km guardado en la unidad ({formatKm(vehicle.current_mileage)}) está atrás. Las alertas
-          usan <strong>{formatKm(vehicle.effective_mileage)}</strong> km (del último servicio
-          registrado). Pulsa <strong>Guardar km</strong> con el odómetro de hoy.
-        </p>
-      )}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {vehicle.mileage_stale && (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              El km guardado ({formatKm(vehicle.current_mileage)}) está atrás. Las alertas usan{' '}
+              <strong>{formatKm(vehicle.effective_mileage)}</strong> km. Guarda el odómetro de hoy.
+            </p>
+          )}
+          {daysWithoutMileageUpdate > 5 && (
+            <p className="rounded-md bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900">
+              {daysWithoutMileageUpdate} días sin actualizar el odómetro.
+            </p>
+          )}
 
-      <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-3">
-        {daysWithoutMileageUpdate > 5 && (
-          <p className="w-full rounded-md bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900">
-            {daysWithoutMileageUpdate} días sin actualizar el odómetro.
-          </p>
-        )}
-        <div className="min-w-[120px] flex-1">
-          <label className="mb-1 block text-xs font-medium text-gray-600">
-            Km actual (odómetro)
-          </label>
-          <input
-            type="number"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-            placeholder="Ej. 256759"
-            value={kmInput}
-            onChange={(e) => setKmInput(e.target.value)}
-          />
-        </div>
-        <div className="min-w-[130px]">
-          <label className="mb-1 block text-xs font-medium text-gray-600">Fecha de lectura</label>
-          <input
-            type="date"
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-            value={kmDate}
-            onChange={(e) => setKmDate(e.target.value)}
-          />
-        </div>
-        <Button variant="secondary" onClick={handleSaveKm} disabled={savingMileage}>
-          Guardar km
-        </Button>
-        <p className="w-full text-[11px] text-gray-500">
-          Cada guardado con km o fecha distinta queda en la pestaña <strong>Historial</strong> como
-          &quot;Lectura odómetro&quot; (ej. km del 1 de junio).
-        </p>
-      </div>
-
-      <div className="mb-2 flex flex-wrap gap-2">
-        <Button variant="secondary" className="text-xs" onClick={() => onAddServiceItem(vehicle)}>
-          + Servicio programado
-        </Button>
-        <Button variant="primary" className="text-xs" onClick={() => onRegisterMaintenance(vehicle)}>
-          Registrar servicio
-        </Button>
-        {showIncidents && (
-          <Button
-            variant="secondary"
-            className="text-xs"
-            onClick={() => onAddIncidentReport(vehicle)}
-          >
-            + Reportar incidente
-          </Button>
-        )}
-        {onCopyReportLink && (
-          <Button
-            variant="secondary"
-            className="text-xs"
-            onClick={() => onCopyReportLink(vehicle)}
-          >
-            Link chofer
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        {vehicle.service_items?.length ? (
-          vehicle.service_items.map((item) => (
-            <div key={item.id} className="group relative">
-              <ServiceStatusBar item={item} />
-              <button
-                type="button"
-                className="absolute right-2 top-2 text-xs text-blue-600 opacity-0 group-hover:opacity-100"
-                onClick={() => onEditServiceItem(vehicle, item)}
-              >
-                Editar
-              </button>
+          <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-2.5">
+            <div className="min-w-[110px] flex-1 sm:max-w-[160px]">
+              <label className="mb-1 block text-[11px] font-medium text-gray-600">Km actual</label>
+              <input
+                type="number"
+                className="w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm"
+                placeholder="Ej. 256759"
+                value={kmInput}
+                onChange={(e) => setKmInput(e.target.value)}
+              />
             </div>
-          ))
+            <div className="min-w-[130px]">
+              <label className="mb-1 block text-[11px] font-medium text-gray-600">Fecha lectura</label>
+              <input
+                type="date"
+                className="w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm"
+                value={kmDate}
+                onChange={(e) => setKmDate(e.target.value)}
+              />
+            </div>
+            <Button variant="secondary" onClick={handleSaveKm} disabled={savingMileage}>
+              Guardar km
+            </Button>
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                variant="secondary"
+                className="text-xs"
+                onClick={() => onAddServiceItem(vehicle)}
+              >
+                + Servicio
+              </Button>
+              <Button
+                variant="primary"
+                className="text-xs"
+                onClick={() => onRegisterMaintenance(vehicle)}
+              >
+                Registrar
+              </Button>
+              {showIncidents && (
+                <Button
+                  variant="secondary"
+                  className="text-xs"
+                  onClick={() => onAddIncidentReport(vehicle)}
+                >
+                  + Incidente
+                </Button>
+              )}
+              {onCopyReportLink && (
+                <Button
+                  variant="secondary"
+                  className="text-xs"
+                  onClick={() => onCopyReportLink(vehicle)}
+                >
+                  Link chofer
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        {sortedItems.length ? (
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {sortedItems.map((item) => (
+              <div key={item.id} className="group relative min-w-0">
+                <ServiceStatusBar item={item} compact />
+                <button
+                  type="button"
+                  className="absolute right-2 top-2 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100"
+                  onClick={() => onEditServiceItem(vehicle, item)}
+                >
+                  Editar
+                </button>
+              </div>
+            ))}
+          </div>
         ) : (
-          <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-sm text-gray-500">
-            Sin servicios programados. Agrega cambio de aceite, frenos u otro servicio.
+          <p className="rounded-lg border border-dashed border-gray-200 p-3 text-center text-sm text-gray-500">
+            Sin servicios programados. Agrega aceite, fumigación u otro servicio.
           </p>
         )}
       </div>
 
       {hasHistory && (
-        <div className="mt-3 space-y-2 border-t pt-3">
+        <div className="mt-3 flex flex-wrap gap-4 border-t pt-3">
           {recentMaintenance.length > 0 && (
-            <details>
+            <details className="min-w-[240px] flex-1">
               <summary className="cursor-pointer text-sm font-medium text-gray-700">
                 Últimos servicios ({recentMaintenance.length})
               </summary>
-              <ul className="mt-2 space-y-2 text-xs text-gray-600">
+              <ul className="mt-2 space-y-1.5 text-xs text-gray-600">
                 {recentMaintenance.map((m) => (
-                  <li key={m.id} className="rounded bg-gray-50 p-2">
+                  <li key={m.id} className="rounded bg-gray-50 px-2 py-1.5">
                     <span className="font-medium text-gray-800">
                       {m.maintenance_date
                         ? new Date(m.maintenance_date).toLocaleDateString('es-MX')
@@ -211,9 +219,6 @@ const VehicleFleetCard = ({
                     </span>
                     {m.mileage != null && ` · ${formatKm(m.mileage)} km`}
                     {m.maintenance_type && ` · ${m.maintenance_type}`}
-                    {m.notes && (
-                      <p className="mt-1 whitespace-pre-wrap text-gray-500">{m.notes}</p>
-                    )}
                   </li>
                 ))}
               </ul>
@@ -221,15 +226,15 @@ const VehicleFleetCard = ({
           )}
 
           {showIncidents && recentReports.length > 0 && (
-            <details>
+            <details className="min-w-[240px] flex-1">
               <summary className="cursor-pointer text-sm font-medium text-gray-700">
                 Reportes e incidentes ({recentReports.length})
               </summary>
-              <ul className="mt-2 space-y-2 text-xs text-gray-600">
+              <ul className="mt-2 space-y-1.5 text-xs text-gray-600">
                 {recentReports.map((r) => (
                   <li
                     key={r.id}
-                    className="rounded border border-orange-100 bg-orange-50/50 p-2"
+                    className="rounded border border-orange-100 bg-orange-50/50 px-2 py-1.5"
                   >
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium text-gray-800">
@@ -248,19 +253,11 @@ const VehicleFleetCard = ({
                         {INCIDENT_STATUS_LABELS[r.status] || r.status}
                       </span>
                     </div>
-                    <p className="mt-1 font-medium text-gray-900">{r.title}</p>
-                    <p className="text-gray-500">
-                      {INCIDENT_TYPE_LABELS[r.report_type] || r.report_type}
-                      {r.reported_by && ` · Reportó: ${r.reported_by}`}
-                      {r.mileage != null && ` · ${formatKm(r.mileage)} km`}
-                    </p>
-                    {r.description && (
-                      <p className="mt-1 whitespace-pre-wrap text-gray-600">{r.description}</p>
-                    )}
+                    <p className="mt-0.5 font-medium text-gray-900">{r.title}</p>
                     {onEditIncidentReport && (
                       <button
                         type="button"
-                        className="mt-1 text-blue-600 hover:underline"
+                        className="mt-0.5 text-blue-600 hover:underline"
                         onClick={() => onEditIncidentReport(vehicle, r)}
                       >
                         Editar

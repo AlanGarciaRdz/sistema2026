@@ -29,7 +29,10 @@ import { copyVehicleReportPortalLink } from '../utils/vehicleReportPortal';
 import {
   ITEM_KIND_PRESETS,
   SERVICE_KIND_OPTIONS,
+  SCHEDULE_BASIS_OPTIONS,
   formatKm,
+  isDaysService,
+  addDaysLocal,
   INCIDENT_TYPE_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS
@@ -57,10 +60,15 @@ const emptyServiceItemForm = () => ({
   vehicle_id: '',
   title: '',
   item_kind: 'oil',
+  schedule_basis: 'km',
   next_due_km: '',
   warn_before_km: 5000,
   critical_before_km: 2000,
   interval_km: '',
+  interval_days: '',
+  warn_before_days: 14,
+  critical_before_days: 7,
+  next_due_date: '',
   last_service_km: '',
   last_service_date: '',
   notes: ''
@@ -185,10 +193,15 @@ const Maintenance = () => {
         vehicle_id: vehicle.id,
         title: item.title || '',
         item_kind: item.item_kind || 'custom',
+        schedule_basis: isDaysService(item) ? 'days' : 'km',
         next_due_km: item.next_due_km ?? '',
         warn_before_km: item.warn_before_km ?? 5000,
         critical_before_km: item.critical_before_km ?? 2000,
         interval_km: item.interval_km ?? '',
+        interval_days: item.interval_days ?? '',
+        warn_before_days: item.warn_before_days ?? 14,
+        critical_before_days: item.critical_before_days ?? 7,
+        next_due_date: item.next_due_date ? String(item.next_due_date).slice(0, 10) : '',
         last_service_km: item.last_service_km ?? '',
         last_service_date: item.last_service_date
           ? String(item.last_service_date).slice(0, 10)
@@ -202,6 +215,7 @@ const Maintenance = () => {
         vehicle_id: vehicle.id,
         title: preset.title,
         item_kind: 'oil',
+        schedule_basis: preset.schedule_basis || 'km',
         interval_km: preset.interval_km,
         warn_before_km: preset.warn_before_km,
         critical_before_km: preset.critical_before_km
@@ -217,15 +231,23 @@ const Maintenance = () => {
         ...prev,
         item_kind: kind,
         title: preset.title || prev.title,
+        schedule_basis: preset.schedule_basis || prev.schedule_basis || 'km',
         interval_km: preset.interval_km ?? prev.interval_km,
-        warn_before_km: preset.warn_before_km,
-        critical_before_km: preset.critical_before_km
+        warn_before_km: preset.warn_before_km ?? prev.warn_before_km,
+        critical_before_km: preset.critical_before_km ?? prev.critical_before_km,
+        interval_days: preset.interval_days ?? prev.interval_days,
+        warn_before_days: preset.warn_before_days ?? prev.warn_before_days,
+        critical_before_days: preset.critical_before_days ?? prev.critical_before_days
       };
-      return suggestNextDueKm(next);
+      return suggestNextDue(next);
     });
   };
 
-  const suggestNextDueKm = (form) => {
+  const suggestNextDue = (form) => {
+    if (form.schedule_basis === 'days') {
+      const nextDate = addDaysLocal(form.last_service_date, form.interval_days);
+      return nextDate ? { ...form, next_due_date: nextDate } : form;
+    }
     const last = form.last_service_km ? parseInt(form.last_service_km, 10) : null;
     const interval = form.interval_km ? parseInt(form.interval_km, 10) : null;
     if (Number.isFinite(last) && Number.isFinite(interval)) {
@@ -235,23 +257,55 @@ const Maintenance = () => {
   };
 
   const patchServiceForm = (patch) => {
-    setServiceForm((prev) => suggestNextDueKm({ ...prev, ...patch }));
+    setServiceForm((prev) => suggestNextDue({ ...prev, ...patch }));
   };
 
   const handleServiceItemSubmit = async (e) => {
     e.preventDefault();
     try {
+      const byDays = serviceForm.schedule_basis === 'days';
+      if (byDays && !serviceForm.interval_days) {
+        setToast({ message: 'Indica el intervalo en días', type: 'error' });
+        return;
+      }
+      if (byDays && !serviceForm.last_service_date) {
+        setToast({ message: 'Indica la fecha del último servicio', type: 'error' });
+        return;
+      }
       const payload = {
         vehicle_id: serviceForm.vehicle_id,
         title: serviceForm.title,
         item_kind: serviceForm.item_kind,
-        next_due_km: serviceForm.next_due_km ? parseInt(serviceForm.next_due_km, 10) : null,
-        warn_before_km: parseInt(serviceForm.warn_before_km, 10) || 5000,
-        critical_before_km: parseInt(serviceForm.critical_before_km, 10) || 2000,
-        interval_km: serviceForm.interval_km ? parseInt(serviceForm.interval_km, 10) : null,
-        last_service_km: serviceForm.last_service_km
-          ? parseInt(serviceForm.last_service_km, 10)
+        schedule_basis: byDays ? 'days' : 'km',
+        next_due_km: byDays
+          ? null
+          : serviceForm.next_due_km
+            ? parseInt(serviceForm.next_due_km, 10)
+            : null,
+        warn_before_km: byDays ? null : parseInt(serviceForm.warn_before_km, 10) || 5000,
+        critical_before_km: byDays ? null : parseInt(serviceForm.critical_before_km, 10) || 2000,
+        interval_km: byDays
+          ? null
+          : serviceForm.interval_km
+            ? parseInt(serviceForm.interval_km, 10)
+            : null,
+        interval_days: byDays ? parseInt(serviceForm.interval_days, 10) : null,
+        warn_before_days: byDays
+          ? Number.isFinite(parseInt(serviceForm.warn_before_days, 10))
+            ? parseInt(serviceForm.warn_before_days, 10)
+            : 14
           : null,
+        critical_before_days: byDays
+          ? Number.isFinite(parseInt(serviceForm.critical_before_days, 10))
+            ? parseInt(serviceForm.critical_before_days, 10)
+            : 7
+          : null,
+        next_due_date: byDays ? serviceForm.next_due_date || null : null,
+        last_service_km: byDays
+          ? null
+          : serviceForm.last_service_km
+            ? parseInt(serviceForm.last_service_km, 10)
+            : null,
         last_service_date: serviceForm.last_service_date || null,
         notes: serviceForm.notes || null
       };
@@ -275,8 +329,11 @@ const Maintenance = () => {
       setIsServiceModalOpen(false);
       setEditingServiceItem(null);
       refreshAll();
-    } catch {
-      setToast({ message: 'Error al guardar servicio programado', type: 'error' });
+    } catch (err) {
+      setToast({
+        message: err?.response?.data?.error || 'Error al guardar servicio programado',
+        type: 'error'
+      });
     }
   };
 
@@ -611,7 +668,7 @@ const Maintenance = () => {
           {loadingFleet ? (
             <Loading />
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="space-y-4">
               {sortedFleet.map((vehicle) => (
                 <VehicleFleetCard
                   key={vehicle.id}
@@ -777,57 +834,119 @@ const Maintenance = () => {
             onChange={(e) => applyServiceKindPreset(e.target.value)}
             options={SERVICE_KIND_OPTIONS}
           />
+          <FormSelect
+            label="Medición"
+            value={serviceForm.schedule_basis}
+            onChange={(e) => patchServiceForm({ schedule_basis: e.target.value })}
+            options={SCHEDULE_BASIS_OPTIONS}
+          />
           <FormInput
             label="Nombre"
             value={serviceForm.title}
             onChange={(e) => setServiceForm({ ...serviceForm, title: e.target.value })}
             required
           />
-          <FormInput
-            label="Último servicio (km)"
-            type="number"
-            value={serviceForm.last_service_km}
-            onChange={(e) => patchServiceForm({ last_service_km: e.target.value })}
-          />
-          <p className="text-xs text-gray-500 -mt-2">
-            Al cambiar el km o la fecha del último servicio y guardar, se agrega una entrada en la
-            pestaña <strong>Historial</strong> para análisis futuro (cargas de AdBlue, aceite, etc.).
-          </p>
-          <FormInput
-            label="Intervalo después del servicio (km)"
-            type="number"
-            value={serviceForm.interval_km}
-            onChange={(e) => patchServiceForm({ interval_km: e.target.value })}
-            placeholder="Ej. 10000 aceite, 30000 frenos"
-          />
-          <FormInput
-            label="Próximo servicio (km) = último + intervalo"
-            type="number"
-            value={serviceForm.next_due_km}
-            onChange={(e) => setServiceForm({ ...serviceForm, next_due_km: e.target.value })}
-            placeholder="Se calcula solo al llenar último + intervalo"
-            required
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput
-              label="Alerta amarilla (km antes)"
-              type="number"
-              value={serviceForm.warn_before_km}
-              onChange={(e) => setServiceForm({ ...serviceForm, warn_before_km: e.target.value })}
-            />
-            <FormInput
-              label="Alerta roja (km antes)"
-              type="number"
-              value={serviceForm.critical_before_km}
-              onChange={(e) => setServiceForm({ ...serviceForm, critical_before_km: e.target.value })}
-            />
-          </div>
-          <FormInput
-            label="Fecha último servicio"
-            type="date"
-            value={serviceForm.last_service_date}
-            onChange={(e) => setServiceForm({ ...serviceForm, last_service_date: e.target.value })}
-          />
+          {serviceForm.schedule_basis === 'days' ? (
+            <>
+              <p className="text-xs text-gray-500 -mt-2">
+                Todo va en días. Ejemplo: fumigación cada 60 días, amarilla 14 días antes, roja 7
+                días antes.
+              </p>
+              <FormInput
+                label="Fecha del último servicio"
+                type="date"
+                value={serviceForm.last_service_date}
+                onChange={(e) => patchServiceForm({ last_service_date: e.target.value })}
+                required
+              />
+              <FormInput
+                label="Intervalo (días)"
+                type="number"
+                min="1"
+                value={serviceForm.interval_days}
+                onChange={(e) => patchServiceForm({ interval_days: e.target.value })}
+                placeholder="Ej. 60"
+                required
+              />
+              <FormInput
+                label="Próximo servicio = último + días"
+                type="date"
+                value={serviceForm.next_due_date}
+                onChange={(e) => setServiceForm({ ...serviceForm, next_due_date: e.target.value })}
+                required
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Alerta amarilla (días antes)"
+                  type="number"
+                  min="0"
+                  value={serviceForm.warn_before_days}
+                  onChange={(e) =>
+                    setServiceForm({ ...serviceForm, warn_before_days: e.target.value })
+                  }
+                />
+                <FormInput
+                  label="Alerta roja (días antes)"
+                  type="number"
+                  min="0"
+                  value={serviceForm.critical_before_days}
+                  onChange={(e) =>
+                    setServiceForm({ ...serviceForm, critical_before_days: e.target.value })
+                  }
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <FormInput
+                label="Último servicio (km)"
+                type="number"
+                value={serviceForm.last_service_km}
+                onChange={(e) => patchServiceForm({ last_service_km: e.target.value })}
+              />
+              <p className="text-xs text-gray-500 -mt-2">
+                Al cambiar el km o la fecha del último servicio y guardar, se agrega una entrada en la
+                pestaña <strong>Historial</strong> para análisis futuro (cargas de AdBlue, aceite, etc.).
+              </p>
+              <FormInput
+                label="Intervalo después del servicio (km)"
+                type="number"
+                value={serviceForm.interval_km}
+                onChange={(e) => patchServiceForm({ interval_km: e.target.value })}
+                placeholder="Ej. 10000 aceite, 30000 frenos"
+              />
+              <FormInput
+                label="Próximo servicio (km) = último + intervalo"
+                type="number"
+                value={serviceForm.next_due_km}
+                onChange={(e) => setServiceForm({ ...serviceForm, next_due_km: e.target.value })}
+                placeholder="Se calcula solo al llenar último + intervalo"
+                required
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Alerta amarilla (km antes)"
+                  type="number"
+                  value={serviceForm.warn_before_km}
+                  onChange={(e) => setServiceForm({ ...serviceForm, warn_before_km: e.target.value })}
+                />
+                <FormInput
+                  label="Alerta roja (km antes)"
+                  type="number"
+                  value={serviceForm.critical_before_km}
+                  onChange={(e) =>
+                    setServiceForm({ ...serviceForm, critical_before_km: e.target.value })
+                  }
+                />
+              </div>
+              <FormInput
+                label="Fecha último servicio"
+                type="date"
+                value={serviceForm.last_service_date}
+                onChange={(e) => setServiceForm({ ...serviceForm, last_service_date: e.target.value })}
+              />
+            </>
+          )}
           <FormInput
             label="Notas"
             value={serviceForm.notes}
@@ -920,22 +1039,38 @@ const Maintenance = () => {
             placeholder="Ej. Frenos delanteros, cambio aceite..."
           />
 
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput
-              label="Próximo servicio (km)"
-              type="number"
-              value={formData.next_service_km}
-              onChange={(e) => setFormData({ ...formData, next_service_km: e.target.value })}
-              placeholder="Si vacío, usa intervalo"
-            />
-            <FormInput
-              label="Intervalo (km)"
-              type="number"
-              value={formData.interval_km}
-              onChange={(e) => setFormData({ ...formData, interval_km: e.target.value })}
-              placeholder="Ej. 30000"
-            />
-          </div>
+          {(() => {
+            const linked = fleet
+              .find((f) => f.id === parseInt(formData.vehicle_id, 10))
+              ?.service_items?.find((it) => String(it.id) === String(formData.service_item_id));
+            if (isDaysService(linked)) {
+              return (
+                <p className="text-sm text-gray-600 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                  Este servicio se mide por días. Al guardar, el próximo queda en{' '}
+                  {linked.interval_days ? `${linked.interval_days} días` : 'el intervalo configurado'}{' '}
+                  después de esta fecha.
+                </p>
+              );
+            }
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Próximo servicio (km)"
+                  type="number"
+                  value={formData.next_service_km}
+                  onChange={(e) => setFormData({ ...formData, next_service_km: e.target.value })}
+                  placeholder="Si vacío, usa intervalo"
+                />
+                <FormInput
+                  label="Intervalo (km)"
+                  type="number"
+                  value={formData.interval_km}
+                  onChange={(e) => setFormData({ ...formData, interval_km: e.target.value })}
+                  placeholder="Ej. 30000"
+                />
+              </div>
+            );
+          })()}
 
           <FormInput
             label="Detalle del servicio"

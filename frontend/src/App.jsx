@@ -16,6 +16,7 @@ import Assignments from './pages/Assignments';
 import PaymentAccounts from './pages/PaymentAccounts';
 import Trips from './pages/Trips';
 import Maintenance from './pages/Maintenance';
+import Reports from './pages/Reports';
 import DriverContractPortal from './pages/DriverContractPortal';
 import VehicleReportPortal from './pages/VehicleReportPortal';
 
@@ -63,6 +64,7 @@ function App() {
               <Route path="trips" element={<Trips />} />
               <Route path="payment-accounts" element={<PaymentAccounts />} />
               <Route path="maintenance" element={<Maintenance />} />
+              <Route path="reports" element={<Reports />} />
             </Route>
           </Route>
         </Routes>

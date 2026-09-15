@@ -65,14 +65,63 @@ export function alertProgress(kmRemaining, warnBeforeKm = 5000, criticalBeforeKm
 }
 
 export const ITEM_KIND_PRESETS = {
-  oil: { title: 'Cambio de aceite', interval_km: 10000, warn_before_km: 5000, critical_before_km: 2000 },
-  brakes: { title: 'Frenos (balatas/discos)', interval_km: 30000, warn_before_km: 5000, critical_before_km: 2000 },
-  adblue: { title: 'AdBlue (urea)', interval_km: 15000, warn_before_km: 3000, critical_before_km: 1500 },
-  tires_front: { title: 'Llantas delanteras', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
-  tires_rear: { title: 'Llantas traseras', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
+  oil: {
+    title: 'Cambio de aceite',
+    schedule_basis: 'km',
+    interval_km: 10000,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  },
+  brakes: {
+    title: 'Frenos (balatas/discos)',
+    schedule_basis: 'km',
+    interval_km: 30000,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  },
+  adblue: {
+    title: 'AdBlue (urea)',
+    schedule_basis: 'km',
+    interval_km: 15000,
+    warn_before_km: 3000,
+    critical_before_km: 1500
+  },
+  tires_front: {
+    title: 'Llantas delanteras',
+    schedule_basis: 'km',
+    interval_km: 40000,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  },
+  tires_rear: {
+    title: 'Llantas traseras',
+    schedule_basis: 'km',
+    interval_km: 40000,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  },
   /** @deprecated usar tires_front / tires_rear */
-  tires: { title: 'Llantas', interval_km: 40000, warn_before_km: 5000, critical_before_km: 2000 },
-  custom: { title: '', interval_km: null, warn_before_km: 5000, critical_before_km: 2000 }
+  tires: {
+    title: 'Llantas',
+    schedule_basis: 'km',
+    interval_km: 40000,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  },
+  fumigation: {
+    title: 'Fumigación',
+    schedule_basis: 'days',
+    interval_days: 60,
+    warn_before_days: 14,
+    critical_before_days: 7
+  },
+  custom: {
+    title: '',
+    schedule_basis: 'km',
+    interval_km: null,
+    warn_before_km: 5000,
+    critical_before_km: 2000
+  }
 };
 
 export const SERVICE_KIND_OPTIONS = [
@@ -81,8 +130,64 @@ export const SERVICE_KIND_OPTIONS = [
   { value: 'adblue', label: 'AdBlue (urea)' },
   { value: 'tires_front', label: 'Llantas delanteras' },
   { value: 'tires_rear', label: 'Llantas traseras' },
+  { value: 'fumigation', label: 'Fumigación (por días)' },
   { value: 'custom', label: 'Otro' }
 ];
+
+export const SCHEDULE_BASIS_OPTIONS = [
+  { value: 'km', label: 'Por kilometraje' },
+  { value: 'days', label: 'Por tiempo (días)' }
+];
+
+export function isDaysService(item) {
+  return String(item?.schedule_basis || 'km').toLowerCase() === 'days';
+}
+
+export function addDaysLocal(dateStr, days) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr).slice(0, 10))) return '';
+  const n = parseInt(days, 10);
+  if (!Number.isFinite(n)) return '';
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Orden: vencido → rojo → amarillo → verde → sin dato; en el mismo color, menos km/días restantes primero. */
+export function sortServiceItemsByPriority(items = []) {
+  const statusRank = { overdue: 5, critical: 4, warning: 3, ok: 2, unknown: 1 };
+  const remainingOf = (item) => {
+    if (item.days_remaining != null && Number.isFinite(Number(item.days_remaining))) {
+      return Number(item.days_remaining);
+    }
+    if (item.km_remaining != null && Number.isFinite(Number(item.km_remaining))) {
+      return Number(item.km_remaining);
+    }
+    return Number.POSITIVE_INFINITY;
+  };
+  return [...items].sort((a, b) => {
+    const ra = statusRank[a.status] || 0;
+    const rb = statusRank[b.status] || 0;
+    if (rb !== ra) return rb - ra;
+
+    const remA = remainingOf(a);
+    const remB = remainingOf(b);
+    if (remA !== remB) return remA - remB;
+
+    const pa = Number.isFinite(Number(a.interval_progress_pct))
+      ? Number(a.interval_progress_pct)
+      : -1;
+    const pb = Number.isFinite(Number(b.interval_progress_pct))
+      ? Number(b.interval_progress_pct)
+      : -1;
+    if (pb !== pa) return pb - pa;
+
+    return String(a.title || '').localeCompare(String(b.title || ''), 'es');
+  });
+}
 
 export const INCIDENT_TYPE_LABELS = {
   crash: 'Choque / accidente',

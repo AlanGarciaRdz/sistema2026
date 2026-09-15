@@ -44,6 +44,34 @@ const parseNotes = (raw) => {
   }
 };
 
+const buildAccountOptions = (accounts, searchRaw, selectedId) => {
+  const q = searchRaw.trim().toLowerCase();
+  let list = accounts;
+  if (q) {
+    list = accounts.filter((a) => {
+      const blob = [a.account_name, a.account_code, a.bank_name, a.business_unit]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return blob.includes(q) || String(a.id).includes(q);
+    });
+  }
+  const opts = list.map((a) => ({
+    value: String(a.id),
+    label: `${a.account_name}${a.bank_name ? ` (${a.bank_name})` : ''}`
+  }));
+  if (selectedId && !opts.some((o) => o.value === String(selectedId))) {
+    const picked = accounts.find((a) => String(a.id) === String(selectedId));
+    if (picked) {
+      opts.unshift({
+        value: String(picked.id),
+        label: `${picked.account_name}${picked.bank_name ? ` (${picked.bank_name})` : ''}`
+      });
+    }
+  }
+  return [{ value: '', label: '— Seleccionar cuenta —' }, ...opts];
+};
+
 const DriverContractPortal = () => {
   const { contractNumber } = useParams();
   const [searchParams] = useSearchParams();
@@ -59,6 +87,9 @@ const DriverContractPortal = () => {
   const [expenseMethod, setExpenseMethod] = useState('Efectivo');
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [expenseNotes, setExpenseNotes] = useState('');
+  const [expenseAssignAccount, setExpenseAssignAccount] = useState(false);
+  const [expenseAccountId, setExpenseAccountId] = useState('');
+  const [expenseAccountSearch, setExpenseAccountSearch] = useState('');
   const [savingExpense, setSavingExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
 
@@ -73,6 +104,9 @@ const DriverContractPortal = () => {
 
   const [casetasPreview, setCasetasPreview] = useState([]);
   const [casetasImportMethod, setCasetasImportMethod] = useState('Transferencia');
+  const [casetasAssignAccount, setCasetasAssignAccount] = useState(false);
+  const [casetasAccountId, setCasetasAccountId] = useState('');
+  const [casetasAccountSearch, setCasetasAccountSearch] = useState('');
   const [casetasParseErrors, setCasetasParseErrors] = useState([]);
   const [importingCasetas, setImportingCasetas] = useState(false);
   const [deletingExpenseId, setDeletingExpenseId] = useState(null);
@@ -142,33 +176,20 @@ const DriverContractPortal = () => {
 
   const paymentAccounts = portal?.paymentAccounts || [];
 
-  const filteredPayAccounts = useMemo(() => {
-    const q = payAccountSearch.trim().toLowerCase();
-    let list = paymentAccounts;
-    if (q) {
-      list = paymentAccounts.filter((a) => {
-        const blob = [a.account_name, a.account_code, a.bank_name, a.business_unit]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return blob.includes(q) || String(a.id).includes(q);
-      });
-    }
-    const opts = list.map((a) => ({
-      value: String(a.id),
-      label: `${a.account_name}${a.bank_name ? ` (${a.bank_name})` : ''}`
-    }));
-    if (payAccountId && !opts.some((o) => o.value === String(payAccountId))) {
-      const picked = paymentAccounts.find((a) => String(a.id) === String(payAccountId));
-      if (picked) {
-        opts.unshift({
-          value: String(picked.id),
-          label: `${picked.account_name}${picked.bank_name ? ` (${picked.bank_name})` : ''}`
-        });
-      }
-    }
-    return [{ value: '', label: '— Seleccionar cuenta —' }, ...opts];
-  }, [paymentAccounts, payAccountSearch, payAccountId]);
+  const filteredPayAccounts = useMemo(
+    () => buildAccountOptions(paymentAccounts, payAccountSearch, payAccountId),
+    [paymentAccounts, payAccountSearch, payAccountId]
+  );
+
+  const filteredExpenseAccounts = useMemo(
+    () => buildAccountOptions(paymentAccounts, expenseAccountSearch, expenseAccountId),
+    [paymentAccounts, expenseAccountSearch, expenseAccountId]
+  );
+
+  const filteredCasetasAccounts = useMemo(
+    () => buildAccountOptions(paymentAccounts, casetasAccountSearch, casetasAccountId),
+    [paymentAccounts, casetasAccountSearch, casetasAccountId]
+  );
 
   const toggleCasetaRow = (key) => {
     setCasetasPreview((prev) =>
@@ -189,6 +210,9 @@ const DriverContractPortal = () => {
     setExpenseMethod('Efectivo');
     setExpenseDate(new Date().toISOString().split('T')[0]);
     setExpenseNotes('');
+    setExpenseAssignAccount(false);
+    setExpenseAccountId('');
+    setExpenseAccountSearch('');
   };
 
   const startEditExpense = (ex) => {
@@ -199,6 +223,9 @@ const DriverContractPortal = () => {
     setExpenseMethod(ex.driver_payment_method || 'Efectivo');
     setExpenseDate(ex.expense_date ? String(ex.expense_date).slice(0, 10) : new Date().toISOString().split('T')[0]);
     setExpenseNotes(parseNotes(ex.notes));
+    setExpenseAssignAccount(Boolean(ex.payment_account_id));
+    setExpenseAccountId(ex.payment_account_id ? String(ex.payment_account_id) : '');
+    setExpenseAccountSearch('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -222,6 +249,10 @@ const DriverContractPortal = () => {
 
   const onSubmitExpense = async (e) => {
     e.preventDefault();
+    if (expenseAssignAccount && !expenseAccountId) {
+      setToast({ message: 'Selecciona la cuenta bancaria', type: 'error' });
+      return;
+    }
     try {
       setSavingExpense(true);
       const payload = {
@@ -229,20 +260,31 @@ const DriverContractPortal = () => {
         amount: parseFloat(expenseAmount),
         payment_method: expenseMethod,
         expense_date: expenseDate,
-        notes: expenseNotes || null
+        notes: expenseNotes || null,
+        payment_account_id: expenseAssignAccount ? expenseAccountId : null
       };
       if (editingExpense) {
         await putDriverPortalExpense(contractNumber, editingExpense.id, payload);
-        setToast({ message: 'Gasto actualizado', type: 'success' });
+        setToast({
+          message: expenseAssignAccount
+            ? 'Gasto actualizado y validado con cuenta'
+            : 'Gasto actualizado',
+          type: 'success'
+        });
         resetExpenseForm();
       } else {
         await postDriverPortalExpense(contractNumber, payload);
         setToast({
-          message: 'Gasto enviado. Queda pendiente de validación en oficina.',
+          message: expenseAssignAccount
+            ? 'Gasto registrado y validado con cuenta bancaria'
+            : 'Gasto enviado. Queda pendiente de validación en oficina.',
           type: 'success'
         });
         setExpenseAmount('');
         setExpenseNotes('');
+        setExpenseAssignAccount(false);
+        setExpenseAccountId('');
+        setExpenseAccountSearch('');
       }
       await load();
     } catch (err) {
@@ -301,20 +343,30 @@ const DriverContractPortal = () => {
       setToast({ message: 'Selecciona al menos un peaje', type: 'error' });
       return;
     }
+    if (casetasAssignAccount && !casetasAccountId) {
+      setToast({ message: 'Selecciona la cuenta bancaria', type: 'error' });
+      return;
+    }
     try {
       setImportingCasetas(true);
       const items = selectedCasetas.map(({ selected: _s, ...row }) => row);
       const res = await postDriverPortalExpensesBulk(contractNumber, {
         payment_method: casetasImportMethod,
+        payment_account_id: casetasAssignAccount ? casetasAccountId : null,
         items
       });
       const { created = 0, skipped = 0 } = res.data || {};
       setToast({
-        message: `Importados ${created} caseta(s)${skipped ? ` · ${skipped} omitido(s) (duplicados)` : ''}`,
+        message: casetasAssignAccount
+          ? `Importados ${created} caseta(s) y validados con cuenta${skipped ? ` · ${skipped} omitido(s)` : ''}`
+          : `Importados ${created} caseta(s)${skipped ? ` · ${skipped} omitido(s) (duplicados)` : ''}`,
         type: 'success'
       });
       setCasetasPreview([]);
       setCasetasParseErrors([]);
+      setCasetasAssignAccount(false);
+      setCasetasAccountId('');
+      setCasetasAccountSearch('');
       await load();
     } catch (err) {
       setToast({ message: err.response?.data?.error || 'Error al importar', type: 'error' });
@@ -486,6 +538,47 @@ const DriverContractPortal = () => {
                 className="w-full text-base border border-gray-300 rounded-lg px-3 py-2"
               />
             </div>
+            <label className="flex items-start gap-2 text-sm text-gray-500 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={expenseAssignAccount}
+                onChange={(e) => {
+                  setExpenseAssignAccount(e.target.checked);
+                  if (!e.target.checked) {
+                    setExpenseAccountId('');
+                    setExpenseAccountSearch('');
+                  }
+                }}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                Asignar cuenta bancaria{' '}
+                <span className="text-gray-400">(oficina · valida de una vez)</span>
+              </span>
+            </label>
+            {expenseAssignAccount && (
+              <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Cuenta bancaria</label>
+                <input
+                  type="text"
+                  value={expenseAccountSearch}
+                  onChange={(e) => setExpenseAccountSearch(e.target.value)}
+                  placeholder="Buscar cuenta, banco…"
+                  className="w-full min-h-[44px] text-sm border border-gray-300 rounded-lg px-3 py-2"
+                />
+                <select
+                  value={expenseAccountId}
+                  onChange={(e) => setExpenseAccountId(e.target.value)}
+                  className="w-full min-h-[48px] text-base border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  {filteredExpenseAccounts.map((opt) => (
+                    <option key={opt.value || 'empty'} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button
               type="submit"
               disabled={savingExpense}
@@ -590,6 +683,47 @@ const DriverContractPortal = () => {
                   ))}
                 </select>
               </div>
+              <label className="flex items-start gap-2 text-sm text-gray-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={casetasAssignAccount}
+                  onChange={(e) => {
+                    setCasetasAssignAccount(e.target.checked);
+                    if (!e.target.checked) {
+                      setCasetasAccountId('');
+                      setCasetasAccountSearch('');
+                    }
+                  }}
+                  className="mt-0.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                />
+                <span>
+                  Asignar cuenta bancaria{' '}
+                  <span className="text-gray-400">(oficina · valida de una vez)</span>
+                </span>
+              </label>
+              {casetasAssignAccount && (
+                <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-3 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">Cuenta bancaria</label>
+                  <input
+                    type="text"
+                    value={casetasAccountSearch}
+                    onChange={(e) => setCasetasAccountSearch(e.target.value)}
+                    placeholder="Buscar cuenta, banco…"
+                    className="w-full min-h-[44px] text-sm border border-gray-300 rounded-lg px-3 py-2"
+                  />
+                  <select
+                    value={casetasAccountId}
+                    onChange={(e) => setCasetasAccountId(e.target.value)}
+                    className="w-full min-h-[48px] text-base border border-gray-300 rounded-lg px-3 py-2"
+                  >
+                    {filteredCasetasAccounts.map((opt) => (
+                      <option key={opt.value || 'empty'} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={onImportCasetasCsv}

@@ -12,6 +12,10 @@ const api = axios.create({
 // Dashboard
 export const getDashboardData = (params) => api.get('/dashboard', { params });
 
+// Reports
+export const getUnitReport = (params) => api.get('/reports/unit', { params });
+export const getCompanyReport = (params) => api.get('/reports/company', { params });
+
 // Clients
 export const getClients = () => api.get('/clients');
 export const getClientById = (id) => api.get(`/clients/${id}`);
@@ -31,6 +35,8 @@ export const getContracts = () => api.get('/contracts');
 export const getContractById = (id) => api.get(`/contracts/${id}`);
 export const createContract = (data) => api.post('/contracts', data);
 export const updateContract = (id, data) => api.put(`/contracts/${id}`, data);
+export const bulkUpdateContractStatus = (ids, status) =>
+  api.patch('/contracts/bulk-status', { ids, status });
 export const syncContractCalendar = (id) => api.post(`/contracts/${id}/calendar-sync`);
 export const deleteContract = (id) => api.delete(`/contracts/${id}`);
 

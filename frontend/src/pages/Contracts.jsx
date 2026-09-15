@@ -9,6 +9,7 @@ import {
   updateAssignment,
   deleteAssignment,
   updateContract,
+  bulkUpdateContractStatus,
   syncContractCalendar,
   getPayments,
   getExpenses,
@@ -108,6 +109,18 @@ const FILTER_PARAM = {
   chofer: 'chofer'
 };
 
+const CONTRACT_STATUS_OPTIONS = [
+  'Cotización enviada',
+  'Orden de compra',
+  'Factura enviada',
+  'Agendado',
+  'En proceso',
+  'Realizado',
+  'Por cobrar',
+  'Por pagar',
+  'Cancelado'
+];
+
 const Contracts = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [contracts, setContracts] = useState([]);
@@ -149,6 +162,10 @@ const Contracts = () => {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportIncludeFinance, setExportIncludeFinance] = useState(true);
   const [exportIncludeExpenseBreakdown, setExportIncludeExpenseBreakdown] = useState(false);
+  const [showProfitSummary, setShowProfitSummary] = useState(false);
+  const [selectedContractIds, setSelectedContractIds] = useState([]);
+  const [bulkStatus, setBulkStatus] = useState('Realizado');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   const fetchAssignments = async () => {
     const response = await getAssignments();
@@ -500,16 +517,36 @@ const Contracts = () => {
 
   const formatDate = formatDateLocal;
 
-  /** Día + fecha en dos líneas para caber en columna estrecha (95px). */
-  const renderDateWeekdayCell = (value) => {
+  /** Día + fecha (+ hora si existe) en columna estrecha. */
+  const getContractTimesFromNotes = (row) => {
+    try {
+      const n = row?.notes ? JSON.parse(row.notes) : {};
+      const start =
+        n.mode === 'servicio'
+          ? (n.serviceTime || '').trim()
+          : (n.departureTime || n.serviceTime || '').trim();
+      const end = (n.returnTime || '').trim();
+      return { startTime: start || null, endTime: end || null };
+    } catch {
+      return { startTime: null, endTime: null };
+    }
+  };
+
+  const renderDateWeekdayCell = (value, timeText) => {
     const full = formatDateWithWeekdayLocal(value);
-    if (!full) return '-';
-    const i = full.indexOf(' ');
-    if (i < 0) return full;
+    if (!full && !timeText) return '-';
+    const i = full ? full.indexOf(' ') : -1;
+    const dayPart = i >= 0 ? full.slice(0, i) : null;
+    const datePart = i >= 0 ? full.slice(i + 1) : full || null;
     return (
       <span className="block leading-snug">
-        <span className="block text-[11px] font-medium text-gray-800">{full.slice(0, i)}</span>
-        <span className="block text-xs text-gray-700">{full.slice(i + 1)}</span>
+        {dayPart && (
+          <span className="block text-[11px] font-medium text-gray-800">{dayPart}</span>
+        )}
+        {datePart && <span className="block text-xs text-gray-700">{datePart}</span>}
+        {timeText ? (
+          <span className="block text-[10px] text-gray-500 tabular-nums mt-0.5">{timeText}</span>
+        ) : null}
       </span>
     );
   };
@@ -595,6 +632,71 @@ const Contracts = () => {
     () => filteredContracts.reduce((s, row) => s + getContractAmountDue(row), 0),
     [filteredContracts]
   );
+
+  const visibleContractIds = useMemo(
+    () => filteredContracts.map((row) => row.id).filter((id) => id != null),
+    [filteredContracts]
+  );
+
+  const allVisibleSelected =
+    visibleContractIds.length > 0 &&
+    visibleContractIds.every((id) => selectedContractIds.includes(id));
+
+  const toggleSelectContract = useCallback((id) => {
+    setSelectedContractIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }, []);
+
+  const selectAllVisibleContracts = useCallback(() => {
+    setSelectedContractIds((prev) => {
+      const set = new Set(prev);
+      visibleContractIds.forEach((id) => set.add(id));
+      return [...set];
+    });
+  }, [visibleContractIds]);
+
+  const clearContractSelection = useCallback(() => {
+    setSelectedContractIds([]);
+  }, []);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    if (allVisibleSelected) {
+      setSelectedContractIds((prev) => prev.filter((id) => !visibleContractIds.includes(id)));
+    } else {
+      selectAllVisibleContracts();
+    }
+  }, [allVisibleSelected, visibleContractIds, selectAllVisibleContracts]);
+
+  const handleBulkStatusUpdate = async () => {
+    if (selectedContractIds.length === 0 || !bulkStatus) return;
+    if (
+      !window.confirm(
+        `¿Cambiar el estado de ${selectedContractIds.length} contrato(s) a «${bulkStatus}»?`
+      )
+    ) {
+      return;
+    }
+    setBulkUpdating(true);
+    try {
+      const res = await bulkUpdateContractStatus(selectedContractIds, bulkStatus);
+      const updated = res.data?.updated ?? selectedContractIds.length;
+      await fetchContracts();
+      setSelectedContractIds([]);
+      setToast({
+        message: `${updated} contrato(s) actualizado(s) a «${bulkStatus}»`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Error bulk updating contract status:', error);
+      setToast({
+        message: error.response?.data?.error || 'Error al actualizar estados',
+        type: 'error'
+      });
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
 
   const getPaidAmount = (contractId) => {
     return (payments || [])
@@ -741,17 +843,95 @@ const Contracts = () => {
     setToast({ message: 'Archivo descargado (ábrelo con Excel)', type: 'success' });
   };
 
+  /** Nombre de unidad (Crafter25, Starex…), no la placa. */
   const getAssignedUnit = (row) => {
-    if (row.vehicle_name) return row.vehicle_name;
     try {
       const n = row.notes ? JSON.parse(row.notes) : {};
       const v = n.vehicle;
-      if (!v) return null;
-      return v.license_plate || v.vehicle_code || v.plate || null;
-    } catch { return null; }
+      if (v && typeof v === 'object') {
+        const code = String(v.vehicle_code || '').trim();
+        if (code) return code;
+        const brandModel = [v.brand, v.model].filter(Boolean).join(' ').trim();
+        if (brandModel) return brandModel;
+        const model = String(v.model || '').trim();
+        if (model) return model;
+        const vType = String(v.vehicle_type || '').trim();
+        if (vType) return vType;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
   };
 
+  const getContractUnitLabel = (row) => {
+    const assigned = getAssignedUnit(row);
+    if (assigned) return assigned;
+    const type = getUnitType(row);
+    if (type && type !== '-') return type;
+    return 'Sin unidad';
+  };
+
+  const filteredProfitSummary = useMemo(() => {
+    let totalQuoted = 0;
+    let totalExpenses = 0;
+    const byUnitMap = {};
+
+    for (const row of filteredContracts) {
+      const quoted = getContractAmountDue(row);
+      const rowExpenses = getTotalExpenses(row.id);
+      const profit = quoted - rowExpenses;
+      totalQuoted += quoted;
+      totalExpenses += rowExpenses;
+
+      const unit = getContractUnitLabel(row);
+      if (!byUnitMap[unit]) {
+        byUnitMap[unit] = { unit, count: 0, quoted: 0, expenses: 0, profit: 0 };
+      }
+      byUnitMap[unit].count += 1;
+      byUnitMap[unit].quoted += quoted;
+      byUnitMap[unit].expenses += rowExpenses;
+      byUnitMap[unit].profit += profit;
+    }
+
+    const totalProfit = totalQuoted - totalExpenses;
+    const marginPct = totalQuoted > 0 ? (totalProfit / totalQuoted) * 100 : null;
+    const byUnit = Object.values(byUnitMap).sort((a, b) => b.profit - a.profit);
+
+    return {
+      count: filteredContracts.length,
+      totalQuoted,
+      totalExpenses,
+      totalProfit,
+      marginPct,
+      byUnit
+    };
+  }, [filteredContracts, expenses, payments]);
+
   const columns = [
+    {
+      header: '',
+      width: '42px',
+      headerRender: () => (
+        <input
+          type="checkbox"
+          checked={allVisibleSelected}
+          onChange={toggleSelectAllVisible}
+          className="rounded border-gray-300 cursor-pointer text-blue-600 focus:ring-blue-500"
+          aria-label="Seleccionar todos los visibles"
+          title="Seleccionar todos los visibles"
+        />
+      ),
+      render: (row) => (
+        <input
+          type="checkbox"
+          checked={selectedContractIds.includes(row.id)}
+          onChange={() => toggleSelectContract(row.id)}
+          className="rounded border-gray-300 cursor-pointer text-blue-600 focus:ring-blue-500"
+          aria-label={`Seleccionar contrato ${row.contract_number || row.id}`}
+        />
+      )
+    },
     {
       header: 'No. Contrato',
       width: '140px',
@@ -805,13 +985,19 @@ const Contracts = () => {
     },
     {
       header: 'Fecha Inicio',
-      render: (row) => renderDateWeekdayCell(row.start_date),
+      render: (row) => {
+        const { startTime } = getContractTimesFromNotes(row);
+        return renderDateWeekdayCell(row.start_date, startTime);
+      },
       width: '95px',
       wrap: true
     },
     {
       header: 'Fecha Fin',
-      render: (row) => renderDateWeekdayCell(row.end_date),
+      render: (row) => {
+        const { endTime } = getContractTimesFromNotes(row);
+        return renderDateWeekdayCell(row.end_date, endTime);
+      },
       width: '95px',
       wrap: true
     },
@@ -823,6 +1009,15 @@ const Contracts = () => {
           {hasActiveFilters && (
             <span className="normal-case text-[11px] font-bold text-blue-800 tabular-nums leading-tight">
               Σ {formatCurrency(filteredTotalSum)}
+            </span>
+          )}
+          {showProfitSummary && filteredContracts.length > 0 && (
+            <span
+              className={`normal-case text-[11px] font-bold tabular-nums leading-tight ${
+                filteredProfitSummary.totalProfit >= 0 ? 'text-emerald-700' : 'text-red-600'
+              }`}
+            >
+              Util. {formatCurrency(filteredProfitSummary.totalProfit)}
             </span>
           )}
         </div>
@@ -1038,8 +1233,144 @@ const Contracts = () => {
           <span className="text-xs text-gray-600">
             {filteredContracts.length} registro{filteredContracts.length === 1 ? '' : 's'} (según filtros)
           </span>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none ml-auto sm:ml-0">
+            <input
+              type="checkbox"
+              checked={showProfitSummary}
+              onChange={(e) => setShowProfitSummary(e.target.checked)}
+              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            Mostrar resumen de utilidad
+          </label>
         </div>
       </div>
+
+      {showProfitSummary && filteredContracts.length > 0 && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-4">
+          <p className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">
+            Resumen financiero (filtro actual · {filteredProfitSummary.count} viaje
+            {filteredProfitSummary.count === 1 ? '' : 's'})
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white rounded-lg border border-emerald-100 px-3 py-2">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">Monto cotizado</p>
+              <p className="text-base font-bold text-gray-900 tabular-nums">
+                {formatCurrency(filteredProfitSummary.totalQuoted)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-emerald-100 px-3 py-2">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">Egresos</p>
+              <p className="text-base font-bold text-gray-900 tabular-nums">
+                {formatCurrency(filteredProfitSummary.totalExpenses)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-emerald-100 px-3 py-2 col-span-2 sm:col-span-1">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">Utilidad proyectada</p>
+              <p
+                className={`text-base font-bold tabular-nums ${
+                  filteredProfitSummary.totalProfit >= 0 ? 'text-emerald-800' : 'text-red-600'
+                }`}
+              >
+                {formatCurrency(filteredProfitSummary.totalProfit)}
+                {filteredProfitSummary.marginPct != null && (
+                  <span className="text-xs font-semibold ml-1">
+                    ({filteredProfitSummary.marginPct.toFixed(1)}%)
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-emerald-100 px-3 py-2 hidden sm:block">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">Viajes</p>
+              <p className="text-base font-bold text-gray-900 tabular-nums">
+                {filteredProfitSummary.count}
+              </p>
+            </div>
+          </div>
+          {filteredProfitSummary.byUnit.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-emerald-900 uppercase tracking-wide mb-2">
+                Utilidad por unidad
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                {filteredProfitSummary.byUnit.map((u) => (
+                  <div
+                    key={u.unit}
+                    className="bg-white rounded-lg border border-emerald-100 px-3 py-2 text-sm"
+                  >
+                    <p className="font-semibold text-gray-900 truncate" title={u.unit}>
+                      {u.unit}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {u.count} viaje{u.count === 1 ? '' : 's'}
+                    </p>
+                    <p
+                      className={`font-bold tabular-nums mt-1 ${
+                        u.profit >= 0 ? 'text-emerald-700' : 'text-red-600'
+                      }`}
+                    >
+                      {formatCurrency(u.profit)}
+                    </p>
+                    <p className="text-[10px] text-gray-500 tabular-nums leading-snug mt-0.5">
+                      Cotizado {formatCurrency(u.quoted)} · Egresos {formatCurrency(u.expenses)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="text-[11px] text-emerald-900/70">
+            Utilidad = monto cotizado − egresos del contrato (incluye viajes aún no cobrados).
+          </p>
+        </div>
+      )}
+
+      {selectedContractIds.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-100 text-sm">
+          <span className="text-gray-800 font-medium">
+            {selectedContractIds.length} seleccionado
+            {selectedContractIds.length === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            onClick={selectAllVisibleContracts}
+            className="text-blue-700 hover:text-blue-900 font-medium underline-offset-2 hover:underline"
+          >
+            Marcar todos (visibles)
+          </button>
+          <button
+            type="button"
+            onClick={clearContractSelection}
+            className="text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
+          >
+            Limpiar
+          </button>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <label className="text-xs font-medium text-gray-600" htmlFor="bulk-contract-status">
+              Nuevo estado
+            </label>
+            <select
+              id="bulk-contract-status"
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px] bg-white"
+            >
+              {CONTRACT_STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={bulkUpdating || !bulkStatus}
+              onClick={handleBulkStatusUpdate}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {bulkUpdating ? 'Actualizando…' : `Aplicar (${selectedContractIds.length})`}
+            </button>
+          </div>
+        </div>
+      )}
 
       <Table
         columns={columns}

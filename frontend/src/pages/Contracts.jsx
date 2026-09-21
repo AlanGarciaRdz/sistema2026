@@ -10,6 +10,7 @@ import {
   deleteAssignment,
   updateContract,
   bulkUpdateContractStatus,
+  bulkUpdateContractRefs,
   syncContractCalendar,
   getPayments,
   getExpenses,
@@ -107,7 +108,9 @@ const FILTER_PARAM = {
   noContrato: 'contrato',
   estado: 'estado',
   destino: 'destino',
-  chofer: 'chofer'
+  chofer: 'chofer',
+  oc: 'oc',
+  factura: 'factura'
 };
 
 const CONTRACT_STATUS_OPTIONS = [
@@ -141,6 +144,8 @@ const Contracts = () => {
   const filterEstado = searchParams.get(FILTER_PARAM.estado) || '';
   const filterDestino = searchParams.get(FILTER_PARAM.destino) || '';
   const filterChofer = searchParams.get(FILTER_PARAM.chofer) || '';
+  const filterOc = searchParams.get(FILTER_PARAM.oc) || '';
+  const filterFactura = searchParams.get(FILTER_PARAM.factura) || '';
 
   const setFilterParam = useCallback(
     (paramKey, value) => {
@@ -166,7 +171,10 @@ const Contracts = () => {
   const [showProfitSummary, setShowProfitSummary] = useState(false);
   const [selectedContractIds, setSelectedContractIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('Realizado');
+  const [bulkOcRef, setBulkOcRef] = useState('');
+  const [bulkInvoiceRef, setBulkInvoiceRef] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkRefsUpdating, setBulkRefsUpdating] = useState(false);
 
   const fetchAssignments = async () => {
     const response = await getAssignments();
@@ -286,6 +294,8 @@ const Contracts = () => {
         num_units: 1,
         event_type: payload.mode === 'contrato' ? 'Contrato' : 'Servicio',
         vehicle_name: payload.vehicle?.license_plate || payload.vehicle?.plate || payload.vehicle?.vehicle_code || null,
+        purchase_order_ref: payload.purchaseOrderRef ?? '',
+        invoice_ref: payload.invoiceRef ?? '',
         notes: JSON.stringify(nextNotesObj)
       };
 
@@ -417,6 +427,8 @@ const Contracts = () => {
           : '',
       notes: notesData.uiNotes ?? notesData.notes ?? '',
       status: statusReverseMap[row.status] || 'scheduled',
+      purchaseOrderRef: row.purchase_order_ref || '',
+      invoiceRef: row.invoice_ref || '',
       departure: mode === 'contrato' ? startDateStr : '',
       returnDate: mode === 'contrato' ? endDateStr : '',
       departureTime: notesData.departureTime || '',
@@ -476,6 +488,8 @@ const Contracts = () => {
           : '',
       notes: notesData.uiNotes ?? notesData.notes ?? '',
       status: statusReverseMap[row.status] || 'scheduled',
+      purchaseOrderRef: row.purchase_order_ref || '',
+      invoiceRef: row.invoice_ref || '',
       departure: mode === 'contrato' ? startDateStr : '',
       returnDate: mode === 'contrato' ? endDateStr : '',
       departureTime: notesData.departureTime || '',
@@ -614,6 +628,14 @@ const Contracts = () => {
         const names = getAssignedDriverNames(row);
         if (!names.some((name) => name.toLowerCase().includes(q))) return false;
       }
+      if (filterOc.trim()) {
+        const oc = (row.purchase_order_ref || '').toLowerCase();
+        if (!oc.includes(filterOc.toLowerCase().trim())) return false;
+      }
+      if (filterFactura.trim()) {
+        const fac = (row.invoice_ref || '').toLowerCase();
+        if (!fac.includes(filterFactura.toLowerCase().trim())) return false;
+      }
       return true;
     });
     return sortContractsByStartSchedule(filtered);
@@ -626,6 +648,8 @@ const Contracts = () => {
     filterEstado,
     filterDestino,
     filterChofer,
+    filterOc,
+    filterFactura,
     assignments
   ]);
 
@@ -638,7 +662,9 @@ const Contracts = () => {
           (filterNoContrato && filterNoContrato.trim()) ||
           filterEstado ||
           (filterDestino && filterDestino.trim()) ||
-          (filterChofer && filterChofer.trim())
+          (filterChofer && filterChofer.trim()) ||
+          (filterOc && filterOc.trim()) ||
+          (filterFactura && filterFactura.trim())
       ),
     [
       filterFechaInicio,
@@ -647,7 +673,9 @@ const Contracts = () => {
       filterNoContrato,
       filterEstado,
       filterDestino,
-      filterChofer
+      filterChofer,
+      filterOc,
+      filterFactura
     ]
   );
 
@@ -721,6 +749,54 @@ const Contracts = () => {
     }
   };
 
+  const handleBulkRefsUpdate = async () => {
+    if (selectedContractIds.length === 0) return;
+    const ocTrim = bulkOcRef.trim();
+    const invTrim = bulkInvoiceRef.trim();
+    if (!ocTrim && !invTrim) {
+      setToast({
+        message: 'Escribe un folio de OC y/o de factura para asignar',
+        type: 'error'
+      });
+      return;
+    }
+    const refs = {};
+    if (ocTrim) refs.purchase_order_ref = ocTrim;
+    if (invTrim) refs.invoice_ref = invTrim;
+
+    const parts = [];
+    if (refs.purchase_order_ref) parts.push(`OC «${refs.purchase_order_ref}»`);
+    if (refs.invoice_ref) parts.push(`Factura «${refs.invoice_ref}»`);
+    if (
+      !window.confirm(
+        `¿Asignar ${parts.join(' y ')} a ${selectedContractIds.length} contrato(s)?`
+      )
+    ) {
+      return;
+    }
+    setBulkRefsUpdating(true);
+    try {
+      const res = await bulkUpdateContractRefs(selectedContractIds, refs);
+      const updated = res.data?.updated ?? selectedContractIds.length;
+      await fetchContracts();
+      setSelectedContractIds([]);
+      setBulkOcRef('');
+      setBulkInvoiceRef('');
+      setToast({
+        message: `${updated} contrato(s) con folio(s) asignado(s)`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Error bulk updating contract refs:', error);
+      setToast({
+        message: error.response?.data?.error || 'Error al asignar folios',
+        type: 'error'
+      });
+    } finally {
+      setBulkRefsUpdating(false);
+    }
+  };
+
   const getPaidAmount = (contractId) => {
     return (payments || [])
       .filter((p) => p.contract_id != null && p.contract_id == contractId)
@@ -774,6 +850,8 @@ const Contracts = () => {
       'Itinerario',
       'Tipo de unidad',
       'Chofer asignado',
+      'Folio OC',
+      'Folio factura',
       'Km admin',
       'Precio MXN/km (cotizado ÷ km)',
       'Precio MXN/km (cobrado ÷ km)'
@@ -816,6 +894,8 @@ const Contracts = () => {
         (row.itinerary ?? '').trim(),
         getUnitType(row),
         drivers.length ? drivers.join('; ') : '',
+        row.purchase_order_ref ?? '',
+        row.invoice_ref ?? '',
         km ?? '',
         precioLista,
         precioCobKm
@@ -1129,6 +1209,42 @@ const Contracts = () => {
           {row.status}
         </span>
       )
+    },
+    {
+      header: 'OC',
+      width: '90px',
+      wrap: true,
+      render: (row) =>
+        row.purchase_order_ref ? (
+          <button
+            type="button"
+            className="text-xs font-medium text-indigo-700 hover:underline text-left break-all"
+            title="Filtrar por esta OC"
+            onClick={() => setFilterParam(FILTER_PARAM.oc, row.purchase_order_ref)}
+          >
+            {row.purchase_order_ref}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        )
+    },
+    {
+      header: 'Factura',
+      width: '90px',
+      wrap: true,
+      render: (row) =>
+        row.invoice_ref ? (
+          <button
+            type="button"
+            className="text-xs font-medium text-teal-700 hover:underline text-left break-all"
+            title="Filtrar por esta factura"
+            onClick={() => setFilterParam(FILTER_PARAM.factura, row.invoice_ref)}
+          >
+            {row.invoice_ref}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        )
     }
   ];
 
@@ -1147,7 +1263,7 @@ const Contracts = () => {
 
       <div className="mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200">
         <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Filtros</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           <div className="min-w-0">
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha inicio</label>
             <input
@@ -1222,6 +1338,26 @@ const Contracts = () => {
               placeholder="Nombre del chofer..."
               value={filterChofer}
               onChange={(e) => setFilterParam(FILTER_PARAM.chofer, e.target.value)}
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Folio OC</label>
+            <input
+              type="text"
+              placeholder="ej. OC-2026-014"
+              value={filterOc}
+              onChange={(e) => setFilterParam(FILTER_PARAM.oc, e.target.value)}
+              className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Folio factura</label>
+            <input
+              type="text"
+              placeholder="ej. FAC-A2069"
+              value={filterFactura}
+              onChange={(e) => setFilterParam(FILTER_PARAM.factura, e.target.value)}
               className="w-full min-h-[44px] text-sm border border-gray-200 rounded-lg px-3 py-2.5 sm:py-1.5 touch-manipulation"
             />
           </div>
@@ -1348,48 +1484,86 @@ const Contracts = () => {
       )}
 
       {selectedContractIds.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-100 text-sm">
-          <span className="text-gray-800 font-medium">
-            {selectedContractIds.length} seleccionado
-            {selectedContractIds.length === 1 ? '' : 's'}
-          </span>
-          <button
-            type="button"
-            onClick={selectAllVisibleContracts}
-            className="text-blue-700 hover:text-blue-900 font-medium underline-offset-2 hover:underline"
-          >
-            Marcar todos (visibles)
-          </button>
-          <button
-            type="button"
-            onClick={clearContractSelection}
-            className="text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
-          >
-            Limpiar
-          </button>
-          <div className="flex flex-wrap items-center gap-2 ml-auto">
-            <label className="text-xs font-medium text-gray-600" htmlFor="bulk-contract-status">
-              Nuevo estado
-            </label>
-            <select
-              id="bulk-contract-status"
-              value={bulkStatus}
-              onChange={(e) => setBulkStatus(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px] bg-white"
-            >
-              {CONTRACT_STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+        <div className="mb-4 flex flex-col gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-100 text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-gray-800 font-medium">
+              {selectedContractIds.length} seleccionado
+              {selectedContractIds.length === 1 ? '' : 's'}
+            </span>
             <button
               type="button"
-              disabled={bulkUpdating || !bulkStatus}
-              onClick={handleBulkStatusUpdate}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:pointer-events-none"
+              onClick={selectAllVisibleContracts}
+              className="text-blue-700 hover:text-blue-900 font-medium underline-offset-2 hover:underline"
             >
-              {bulkUpdating ? 'Actualizando…' : `Aplicar (${selectedContractIds.length})`}
+              Marcar todos (visibles)
+            </button>
+            <button
+              type="button"
+              onClick={clearContractSelection}
+              className="text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
+            >
+              Limpiar
+            </button>
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              <label className="text-xs font-medium text-gray-600" htmlFor="bulk-contract-status">
+                Nuevo estado
+              </label>
+              <select
+                id="bulk-contract-status"
+                value={bulkStatus}
+                onChange={(e) => setBulkStatus(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px] bg-white"
+              >
+                {CONTRACT_STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={bulkUpdating || !bulkStatus}
+                onClick={handleBulkStatusUpdate}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {bulkUpdating ? 'Actualizando…' : `Aplicar (${selectedContractIds.length})`}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-2 border-t border-blue-100/80 pt-3">
+            <div className="min-w-[140px] flex-1 max-w-[200px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="bulk-oc-ref">
+                Folio OC
+              </label>
+              <input
+                id="bulk-oc-ref"
+                type="text"
+                placeholder="OC-2026-014"
+                value={bulkOcRef}
+                onChange={(e) => setBulkOcRef(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px] bg-white"
+              />
+            </div>
+            <div className="min-w-[140px] flex-1 max-w-[200px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="bulk-invoice-ref">
+                Folio factura
+              </label>
+              <input
+                id="bulk-invoice-ref"
+                type="text"
+                placeholder="FAC-A2069"
+                value={bulkInvoiceRef}
+                onChange={(e) => setBulkInvoiceRef(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[40px] bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={bulkRefsUpdating || (!bulkOcRef.trim() && !bulkInvoiceRef.trim())}
+              onClick={handleBulkRefsUpdate}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold text-sm shadow-sm hover:bg-indigo-700 disabled:opacity-40 disabled:pointer-events-none min-h-[40px]"
+            >
+              {bulkRefsUpdating ? 'Asignando…' : 'Asignar folios'}
             </button>
           </div>
         </div>

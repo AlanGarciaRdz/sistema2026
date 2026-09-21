@@ -37,6 +37,9 @@ export const createContract = (data) => api.post('/contracts', data);
 export const updateContract = (id, data) => api.put(`/contracts/${id}`, data);
 export const bulkUpdateContractStatus = (ids, status) =>
   api.patch('/contracts/bulk-status', { ids, status });
+/** Asigna folio OC y/o factura a varios contratos. Pasa solo las keys a actualizar. */
+export const bulkUpdateContractRefs = (ids, refs = {}) =>
+  api.patch('/contracts/bulk-refs', { ids, ...refs });
 export const syncContractCalendar = (id) => api.post(`/contracts/${id}/calendar-sync`);
 export const deleteContract = (id) => api.delete(`/contracts/${id}`);
 

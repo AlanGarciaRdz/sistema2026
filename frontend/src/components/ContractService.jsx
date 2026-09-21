@@ -104,6 +104,8 @@ const ContractService = ({
     const [adminKm,     setAdminKm]      = useState('');
     const [notes,        setNotes]        = useState('');
     const [status,       setStatus]       = useState('scheduled'); // + quote_sent, purchase_order, invoice_sent
+    const [purchaseOrderRef, setPurchaseOrderRef] = useState('');
+    const [invoiceRef, setInvoiceRef] = useState('');
 
     // ── contrato-only ──
     const [departure,     setDeparture]     = useState('');
@@ -204,6 +206,8 @@ const ContractService = ({
             );
             setNotes(editingContract.notes ?? '');
             setStatus(editingContract.status || 'scheduled');
+            setPurchaseOrderRef(editingContract.purchaseOrderRef || '');
+            setInvoiceRef(editingContract.invoiceRef || '');
             setDeparture(editingContract.departure || '');
             setDepartureTime(editingContract.departureTime || '');
             setReturnDate(editingContract.returnDate || '');
@@ -342,6 +346,8 @@ const ContractService = ({
         setAdminKm('');
         setNotes('');
         setStatus('scheduled');
+        setPurchaseOrderRef('');
+        setInvoiceRef('');
         setDeparture('');
         setDepartureTime('');
         setReturnDate('');
@@ -434,6 +440,8 @@ const ContractService = ({
         adminKm: String(adminKm || '').trim() === '' ? null : Number(String(adminKm).replace(',', '.')),
         notes,
         status,
+        purchaseOrderRef: String(purchaseOrderRef || '').trim(),
+        invoiceRef: String(invoiceRef || '').trim(),
         };
         const tripDate = mode === 'contrato' ? departure : serviceDate;
         const validDriverRows = driverRows.filter((row) => row.driver_id);
@@ -947,6 +955,28 @@ const ContractService = ({
                 <option value="pending_pay">Por pagar</option>
                 <option value="cancelled">Cancelado</option>
               </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Folio OC</label>
+              <input
+                type="text"
+                placeholder="OC-2026-014"
+                value={purchaseOrderRef}
+                onChange={(e) => setPurchaseOrderRef(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500">Folio factura</label>
+              <input
+                type="text"
+                placeholder="FAC-A2069"
+                value={invoiceRef}
+                onChange={(e) => setInvoiceRef(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition"
+              />
             </div>
 
             <div className="col-span-2 flex flex-col gap-2">

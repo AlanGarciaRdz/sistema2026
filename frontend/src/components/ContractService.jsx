@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { getClients, getVehicles, getDrivers } from '../services/api';
+import { getClients, getVehicles, getDrivers, createClient, getPaymentAccounts } from '../services/api';
 import Modal from './Modal';
 import Loading from './Loading';
 import Toast from './Toast';
@@ -19,6 +19,13 @@ const UNIT_TYPES = [
     'Suburban',
     'Auto 4-6 plazas',
   ];
+
+const ANTICIPO_METHODS = [
+  { value: 'Efectivo', label: 'Efectivo' },
+  { value: 'Transferencia', label: 'Transferencia' },
+  { value: 'Depósito', label: 'Depósito' },
+  { value: 'Tarjeta', label: 'Tarjeta' }
+];
 
   const generateContractNumber = () => {
     const now = new Date();
@@ -54,6 +61,18 @@ const ContractService = ({
     // Client data
     const [clients, setClients] = useState([]);
     const [selectedClient, setSelectedClient] = useState(null);
+    const [showNewClient, setShowNewClient] = useState(false);
+    const [newClientName, setNewClientName] = useState('');
+    const [newClientPhone, setNewClientPhone] = useState('');
+    const [savingClient, setSavingClient] = useState(false);
+
+    // Anticipo (solo contrato nuevo)
+    const [includeAnticipo, setIncludeAnticipo] = useState(false);
+    const [anticipoAmount, setAnticipoAmount] = useState('');
+    const [anticipoMethod, setAnticipoMethod] = useState('Efectivo');
+    const [anticipoAccountId, setAnticipoAccountId] = useState('');
+    const [anticipoDate, setAnticipoDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [paymentAccounts, setPaymentAccounts] = useState([]);
 
     // Vehicle data
     const [vehicles, setVehicles] = useState([]);
@@ -108,6 +127,7 @@ const ContractService = ({
             fetchClients();
             fetchVehicles();
             fetchDrivers();
+            fetchPaymentAccounts();
         } else {
             document.body.style.overflow = 'unset';
             loadedAssignmentRef.current = null;
@@ -252,12 +272,62 @@ const ContractService = ({
       }
     };
 
+    const fetchPaymentAccounts = async () => {
+      try {
+        const response = await getPaymentAccounts();
+        setPaymentAccounts(response.data.data || []);
+      } catch (error) {
+        console.error('Error loading payment accounts:', error);
+      }
+    };
+
+    const handleCreateNewClient = async () => {
+      const name = String(newClientName || '').trim();
+      const phone = String(newClientPhone || '').trim();
+      if (!name) {
+        setToast({ message: 'El nombre del cliente es obligatorio', type: 'error' });
+        return;
+      }
+      try {
+        setSavingClient(true);
+        const res = await createClient({ name, phone: phone || null });
+        const created = res.data?.data;
+        if (!created?.id) throw new Error('Sin id de cliente');
+        setClients((prev) => {
+          const next = [...prev.filter((c) => String(c.id) !== String(created.id)), created];
+          return next.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+        });
+        setSelectedClient(created);
+        setContactName(created.name || name);
+        setContactPhone(created.phone || phone);
+        setShowNewClient(false);
+        setNewClientName('');
+        setNewClientPhone('');
+        setToast({ message: 'Cliente agregado', type: 'success' });
+      } catch (error) {
+        setToast({
+          message: error.response?.data?.error || 'Error al crear cliente',
+          type: 'error'
+        });
+      } finally {
+        setSavingClient(false);
+      }
+    };
+
     const resetForm = () => {
         setSelectedClient(null);
         setSelectedVehicle(null);
         setDriverRows([]);
         setAssignedDate(new Date().toISOString().slice(0, 10));
         loadedAssignmentRef.current = null;
+        setShowNewClient(false);
+        setNewClientName('');
+        setNewClientPhone('');
+        setIncludeAnticipo(false);
+        setAnticipoAmount('');
+        setAnticipoMethod('Efectivo');
+        setAnticipoAccountId('');
+        setAnticipoDate(new Date().toISOString().slice(0, 10));
         setContactName('');
         setContactPhone('');
         setOrigin('');
@@ -401,6 +471,20 @@ const ContractService = ({
           }
         : { ...base, serviceDate, serviceTime, assignments };
 
+        if (!editingContract?.id && includeAnticipo) {
+          const amount = parseFloat(anticipoAmount);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            setToast({ message: 'Indica un monto válido de anticipo', type: 'error' });
+            return;
+          }
+          payload.anticipo = {
+            amount,
+            payment_method: anticipoMethod || 'Efectivo',
+            payment_account_id: anticipoAccountId || null,
+            payment_date: anticipoDate || new Date().toISOString().slice(0, 10)
+          };
+        }
+
         try {
           await onSave(payload);
           resetForm();
@@ -506,22 +590,70 @@ const ContractService = ({
           <div className="flex flex-col gap-3">
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Seleccionar cliente existente</label>
-              <select
-                value={selectedClient?.id || ''}
-                onChange={handleClientSelect}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
-              >
-                <option value="">— Buscar cliente —</option>
-                {clients.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>
-                ))}
-              </select>
-              {selectedClient && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
-                  <span><strong className="text-gray-700">Tel:</strong> {selectedClient.phone}</span>
-                  {selectedClient.email   && <span><strong className="text-gray-700">Email:</strong> {selectedClient.email}</span>}
-                  {selectedClient.address && <span><strong className="text-gray-700">Dir:</strong> {selectedClient.address}</span>}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-medium text-gray-500">Seleccionar cliente existente</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewClient((v) => !v);
+                    if (!showNewClient && !newClientName && contactName) {
+                      setNewClientName(contactName);
+                      setNewClientPhone(contactPhone);
+                    }
+                  }}
+                  className="text-xs font-medium text-blue-600 hover:underline"
+                >
+                  {showNewClient ? 'Usar cliente existente' : '+ Cliente nuevo'}
+                </button>
+              </div>
+              {!showNewClient && (
+                <>
+                  <select
+                    value={selectedClient?.id || ''}
+                    onChange={handleClientSelect}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition appearance-none cursor-pointer"
+                  >
+                    <option value="">— Buscar cliente —</option>
+                    {clients.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} · {c.phone || 'sin teléfono'}</option>
+                    ))}
+                  </select>
+                  {selectedClient && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                      <span><strong className="text-gray-700">Tel:</strong> {selectedClient.phone || '—'}</span>
+                      {selectedClient.email   && <span><strong className="text-gray-700">Email:</strong> {selectedClient.email}</span>}
+                      {selectedClient.address && <span><strong className="text-gray-700">Dir:</strong> {selectedClient.address}</span>}
+                    </div>
+                  )}
+                </>
+              )}
+              {showNewClient && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 space-y-2">
+                  <p className="text-xs text-blue-900">Solo nombre y teléfono. Se guarda en Clientes y queda seleccionado.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nombre *"
+                      value={newClientName}
+                      onChange={(e) => setNewClientName(e.target.value)}
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                    />
+                    <input
+                      type="tel"
+                      placeholder="Teléfono"
+                      value={newClientPhone}
+                      onChange={(e) => setNewClientPhone(e.target.value)}
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCreateNewClient}
+                    disabled={savingClient}
+                    className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingClient ? 'Guardando…' : 'Agregar cliente'}
+                  </button>
                 </div>
               )}
             </div>
@@ -984,6 +1116,73 @@ const ContractService = ({
                 className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white focus:outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 transition resize-y min-h-[72px]"
               />
             </div>
+
+            {!editingContract?.id && (
+              <div className="col-span-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-3 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeAnticipo}
+                    onChange={(e) => setIncludeAnticipo(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm font-medium text-emerald-900">Registrar anticipo al crear</span>
+                </label>
+                {includeAnticipo && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Monto anticipo *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={anticipoAmount}
+                        onChange={(e) => setAnticipoAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Forma de pago</label>
+                      <select
+                        value={anticipoMethod}
+                        onChange={(e) => setAnticipoMethod(e.target.value)}
+                        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                      >
+                        {ANTICIPO_METHODS.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Fecha</label>
+                      <input
+                        type="date"
+                        value={anticipoDate}
+                        onChange={(e) => setAnticipoDate(e.target.value)}
+                        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Cuenta (opcional)</label>
+                      <select
+                        value={anticipoAccountId}
+                        onChange={(e) => setAnticipoAccountId(e.target.value)}
+                        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                      >
+                        <option value="">— Sin cuenta —</option>
+                        {paymentAccounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.account_name || a.account_code}
+                            {a.business_unit ? ` · ${a.business_unit}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
           </div>
 

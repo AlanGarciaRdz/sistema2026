@@ -13,7 +13,8 @@ import {
   syncContractCalendar,
   getPayments,
   getExpenses,
-  getAssignments
+  getAssignments,
+  createPayment
 } from '../services/api';
 import Header from '../components/Header';
 import Table from '../components/Table';
@@ -289,13 +290,35 @@ const Contracts = () => {
       };
 
       let contractId = editingContract?.id || null;
+      let anticipoLogged = false;
       if (editingContract?.id) {
         await updateContract(editingContract.id, contractData);
         setToast({ message: 'Contrato actualizado exitosamente', type: 'success' });
       } else {
         const created = await createContract(contractData);
         contractId = created.data?.data?.id ?? null;
-        setToast({ message: 'Contrato guardado exitosamente', type: 'success' });
+        const anticipo = payload.anticipo;
+        if (contractId && anticipo?.amount > 0) {
+          await createPayment({
+            contract_id: contractId,
+            contract_number: payload.folio || null,
+            payment_type: 'Anticipo',
+            amount: anticipo.amount,
+            payment_method: anticipo.payment_method || 'Efectivo',
+            payment_account_id: anticipo.payment_account_id || null,
+            payment_date: anticipo.payment_date || new Date().toISOString().slice(0, 10),
+            invoice_number: null,
+            iva_amount: null,
+            notes: null
+          });
+          anticipoLogged = true;
+        }
+        setToast({
+          message: anticipoLogged
+            ? 'Contrato y anticipo guardados exitosamente'
+            : 'Contrato guardado exitosamente',
+          type: 'success'
+        });
       }
 
       const assignmentList = Array.isArray(payload.assignments)

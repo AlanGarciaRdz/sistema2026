@@ -370,6 +370,18 @@ const Contracts = () => {
             await deleteAssignment(row.id);
           }
         }
+
+        try {
+          await syncContractCalendar(contractId);
+        } catch (calendarErr) {
+          console.error('Calendar sync after save:', calendarErr);
+          setToast({
+            message:
+              'Contrato guardado, pero el calendario no se sincronizó: ' +
+              (calendarErr.response?.data?.error || 'reintenta con el botón calendario'),
+            type: 'error'
+          });
+        }
       }
 
       setEditingContract(null);

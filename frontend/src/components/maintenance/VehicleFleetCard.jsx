@@ -98,6 +98,19 @@ const VehicleFleetCard = ({
             {vehicle.license_plate && <span className="mr-2">{vehicle.license_plate}</span>}
             {vehicle.brand} {vehicle.model}
           </p>
+          {(vehicle.vin_number || vehicle.motor) && (
+            <p className="text-xs text-gray-500">
+              Número de serie:{' '}
+              <span className="font-mono text-gray-700">
+                {vehicle.vin_number || vehicle.motor}
+              </span>
+              {vehicle.vin_number && vehicle.motor && (
+                <span className="ml-2 text-gray-400">
+                  · Motor: <span className="font-mono">{vehicle.motor}</span>
+                </span>
+              )}
+            </p>
+          )}
           {vehicle.effective_mileage != null && (
             <p className="mt-1 text-xs text-gray-500">
               Odómetro efectivo: <strong>{formatKm(vehicle.effective_mileage)}</strong> km

@@ -23,6 +23,7 @@ const Vehicles = () => {
     year: '',
     vehicle_type: '',
     license_plate: '',
+    vin_number: '',
     passenger_capacity: '',
     fuel_type: '',
     drivedocs: '',
@@ -72,6 +73,7 @@ const Vehicles = () => {
       year: vehicle.year || '',
       vehicle_type: vehicle.vehicle_type || '',
       license_plate: vehicle.license_plate || '',
+      vin_number: vehicle.vin_number || '',
       passenger_capacity: vehicle.passenger_capacity || '',
       fuel_type: vehicle.fuel_type || '',
       drivedocs: vehicle.drivedocs || '',
@@ -100,6 +102,7 @@ const Vehicles = () => {
       year: '',
       vehicle_type: '',
       license_plate: '',
+      vin_number: '',
       passenger_capacity: '',
       fuel_type: '',
       drivedocs: '',
@@ -124,6 +127,18 @@ const Vehicles = () => {
     { header: 'Modelo', accessor: 'model' },
     { header: 'Año', accessor: 'year' },
     { header: 'Placas', accessor: 'license_plate' },
+    {
+      header: 'VIN',
+      accessor: 'vin_number',
+      render: (row) =>
+        row.vin_number ? (
+          <span className="font-mono text-xs text-gray-700" title={row.vin_number}>
+            {row.vin_number}
+          </span>
+        ) : (
+          '—'
+        )
+    },
     { header: 'Capacidad', accessor: 'passenger_capacity' },
     { 
       header: 'Estado', 
@@ -216,6 +231,16 @@ const Vehicles = () => {
               id="license_plate"
               value={formData.license_plate}
               onChange={(e) => setFormData({ ...formData, license_plate: e.target.value })}
+            />
+            <FormInput
+              label="VIN (número de serie)"
+              id="vin_number"
+              value={formData.vin_number}
+              onChange={(e) =>
+                setFormData({ ...formData, vin_number: e.target.value.toUpperCase() })
+              }
+              placeholder="Ej. WV1GRNSY0R9006223"
+              className="col-span-2"
             />
             <FormInput
               label="Capacidad de Pasajeros"

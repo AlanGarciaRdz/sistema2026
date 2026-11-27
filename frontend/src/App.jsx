@@ -19,6 +19,8 @@ import Maintenance from './pages/Maintenance';
 import Reports from './pages/Reports';
 import DriverContractPortal from './pages/DriverContractPortal';
 import VehicleReportPortal from './pages/VehicleReportPortal';
+import VehicleUnitPortal from './pages/VehicleUnitPortal';
+import VehicleInspectionWizard from './pages/VehicleInspectionWizard';
 
 function MainLayout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -49,7 +51,10 @@ function App() {
           <Route path="/login" element={<Login />} />
           {/* Portal chofer: sin login (acceso por número de contrato en la URL). No mover dentro de ProtectedRoute. */}
           <Route path="/c/:contractNumber" element={<DriverContractPortal />} />
-          <Route path="/u/:vehicleKey" element={<VehicleReportPortal />} />
+          <Route path="/u/:vehicleKey" element={<VehicleUnitPortal />} />
+          <Route path="/u/:vehicleKey/incidente" element={<VehicleReportPortal />} />
+          <Route path="/u/:vehicleKey/inspeccion" element={<VehicleInspectionWizard />} />
+          <Route path="/u/:vehicleKey/inspeccion/:inspectionId" element={<VehicleInspectionWizard />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
               <Route index element={<Dashboard />} />

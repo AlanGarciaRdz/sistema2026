@@ -13,6 +13,8 @@ import {
   createIncidentReport,
   updateIncidentReport,
   deleteIncidentReport,
+  getVehicleInspections,
+  getVehicleInspectionById,
   getVehicles,
   getPaymentAccounts
 } from '../services/api';
@@ -37,6 +39,7 @@ import {
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS
 } from '../utils/maintenanceStatus';
+import { INSPECTION_TYPE_LABELS } from '../utils/vehicleInspectionConfig';
 
 const TABS = [
   { id: 'fleet', label: 'Flota y alertas' },
@@ -50,6 +53,7 @@ const emptyMaintenanceForm = () => ({
   maintenance_type: '',
   cost: '',
   payment_account_id: '',
+  workshop: '',
   notes: '',
   service_item_id: '',
   next_service_km: '',
@@ -71,7 +75,10 @@ const emptyServiceItemForm = () => ({
   next_due_date: '',
   last_service_km: '',
   last_service_date: '',
-  notes: ''
+  notes: '',
+  cost: '',
+  workshop: '',
+  payment_account_id: ''
 });
 
 const emptyIncidentForm = () => ({
@@ -92,6 +99,9 @@ const Maintenance = () => {
   const [fleet, setFleet] = useState([]);
   const [maintenance, setMaintenance] = useState([]);
   const [incidentReports, setIncidentReports] = useState([]);
+  const [inspections, setInspections] = useState([]);
+  const [inspectionDetail, setInspectionDetail] = useState(null);
+  const [loadingInspectionDetail, setLoadingInspectionDetail] = useState(false);
   const [vehicles, setVehicles] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loadingFleet, setLoadingFleet] = useState(true);
@@ -109,7 +119,7 @@ const Maintenance = () => {
   const [incidentForm, setIncidentForm] = useState(emptyIncidentForm());
   const [historyVehicleFilter, setHistoryVehicleFilter] = useState('');
   const [historyUnitSearch, setHistoryUnitSearch] = useState('');
-  const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
+  const [historySection, setHistorySection] = useState('services');
 
   const fetchFleet = useCallback(async () => {
     try {
@@ -147,22 +157,48 @@ const Maintenance = () => {
     }
   }, []);
 
+  const fetchInspections = useCallback(async () => {
+    try {
+      const response = await getVehicleInspections({ limit: 200 });
+      setInspections(response.data?.data || []);
+    } catch (error) {
+      console.warn('Inspections not available:', error);
+      setInspections([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchFleet();
     fetchMaintenance();
     fetchIncidentReports();
+    fetchInspections();
     getVehicles()
       .then((r) => setVehicles(r.data.data || []))
       .catch(() => {});
     getPaymentAccounts()
       .then((r) => setAccounts(r.data.data || []))
       .catch(() => {});
-  }, [fetchFleet, fetchMaintenance, fetchIncidentReports]);
+  }, [fetchFleet, fetchMaintenance, fetchIncidentReports, fetchInspections]);
 
   const refreshAll = () => {
     fetchFleet();
     fetchMaintenance();
     fetchIncidentReports();
+    fetchInspections();
+  };
+
+  const openInspectionDetail = async (row) => {
+    try {
+      setLoadingInspectionDetail(true);
+      setInspectionDetail({ loading: true, id: row.id });
+      const res = await getVehicleInspectionById(row.id);
+      setInspectionDetail(res.data.data);
+    } catch {
+      setToast({ message: 'No se pudo cargar el checklist', type: 'error' });
+      setInspectionDetail(null);
+    } finally {
+      setLoadingInspectionDetail(false);
+    }
   };
 
   const handleSaveMileage = async (vehicleId, km, kmDate) => {
@@ -206,7 +242,10 @@ const Maintenance = () => {
         last_service_date: item.last_service_date
           ? String(item.last_service_date).slice(0, 10)
           : '',
-        notes: item.notes || ''
+        notes: item.notes || '',
+        cost: '',
+        workshop: '',
+        payment_account_id: ''
       });
     } else {
       const preset = ITEM_KIND_PRESETS.oil;
@@ -307,7 +346,10 @@ const Maintenance = () => {
             ? parseInt(serviceForm.last_service_km, 10)
             : null,
         last_service_date: serviceForm.last_service_date || null,
-        notes: serviceForm.notes || null
+        notes: serviceForm.notes || null,
+        cost: serviceForm.cost ? parseFloat(serviceForm.cost) : null,
+        workshop: serviceForm.workshop?.trim() || null,
+        payment_account_id: serviceForm.payment_account_id || null
       };
       if (editingServiceItem) {
         const res = await updateServiceItem(editingServiceItem.id, payload);
@@ -448,6 +490,7 @@ const Maintenance = () => {
         maintenance_type: formData.maintenance_type || null,
         cost: formData.cost ? parseFloat(formData.cost) : null,
         payment_account_id: formData.payment_account_id || null,
+        workshop: formData.workshop?.trim() || null,
         notes: formData.notes || null,
         service_item_id: formData.service_item_id || null,
         next_service_km: formData.next_service_km
@@ -480,6 +523,7 @@ const Maintenance = () => {
       maintenance_type: record.maintenance_type || '',
       cost: record.cost ?? '',
       payment_account_id: record.payment_account_id || '',
+      workshop: record.workshop || '',
       notes: record.notes || '',
       service_item_id: record.service_item_id || '',
       next_service_km: record.next_service_km ?? '',
@@ -555,7 +599,8 @@ const Maintenance = () => {
       accessor: 'next_service_km',
       render: (row) => formatKm(row.next_service_km)
     },
-    { header: 'Costo', accessor: 'cost', render: (row) => formatCurrency(row.cost) },
+    { header: 'Costo', accessor: 'cost', render: (row) => (row.cost ? formatCurrency(row.cost) : '-') },
+    { header: 'Dónde', accessor: 'workshop', render: (row) => row.workshop || '-' },
     { header: 'Cuenta', accessor: 'account_name' }
   ];
 
@@ -620,8 +665,74 @@ const Maintenance = () => {
     return label.includes(q) || plate.includes(q) || code.includes(q) || title.includes(q);
   });
 
+  const filteredInspections = inspections.filter((row) => {
+    if (historyVehicleFilter && String(row.vehicle_id) !== String(historyVehicleFilter)) {
+      return false;
+    }
+    const q = historyUnitSearch.trim().toLowerCase();
+    if (!q) return true;
+    const label = [
+      row.vehicle_code,
+      row.license_plate,
+      row.brand,
+      row.model,
+      row.driver_name
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return label.includes(q);
+  });
+
+  const completedInspections = filteredInspections.filter((r) => r.status === 'completed');
+
+  const inspectionColumns = [
+    {
+      header: 'Unidad',
+      accessor: 'vehicle_code',
+      render: (row) =>
+        row.vehicle_code ||
+        [row.brand, row.model].filter(Boolean).join(' ') ||
+        row.license_plate ||
+        `#${row.vehicle_id}`
+    },
+    {
+      header: 'Fecha',
+      accessor: 'completed_at',
+      render: (row) =>
+        formatDate(row.completed_at || row.started_at || row.created_at)
+    },
+    { header: 'Chofer', accessor: 'driver_name', render: (row) => row.driver_name || '—' },
+    {
+      header: 'Tipo',
+      accessor: 'inspection_type',
+      render: (row) => INSPECTION_TYPE_LABELS[row.inspection_type] || row.inspection_type
+    },
+    {
+      header: 'Estado',
+      accessor: 'status',
+      render: (row) => (row.status === 'completed' ? 'Completado' : 'En progreso')
+    },
+    {
+      header: 'Resumen',
+      accessor: 'summary',
+      render: (row) => {
+        let s = row.summary;
+        if (typeof s === 'string') {
+          try {
+            s = JSON.parse(s);
+          } catch {
+            s = null;
+          }
+        }
+        if (!s?.reviewed && !s?.ok && !s?.warnings) return '—';
+        return `✓${s.ok ?? 0} ⚠${s.warnings ?? 0} 🔴${s.critical ?? 0}`;
+      }
+    }
+  ];
+
   const historyFilterActive =
-    historyVehicleFilter || historyUnitSearch.trim() || historyTypeFilter !== 'all';
+    historyVehicleFilter || historyUnitSearch.trim();
 
   if (loadingFleet && loadingHistory && !fleet.length) return <Loading />;
 
@@ -697,19 +808,30 @@ const Maintenance = () => {
             <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">
               Filtrar historial
             </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="min-w-0">
-                <label className="mb-1 block text-xs font-medium text-gray-600">Tipo</label>
-                <select
-                  value={historyTypeFilter}
-                  onChange={(e) => setHistoryTypeFilter(e.target.value)}
-                  className="w-full min-h-[44px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            <div className="mb-3 flex flex-wrap gap-2">
+              {[
+                { id: 'services', label: 'Servicios' },
+                { id: 'reports', label: 'Incidentes' },
+                { id: 'checklists', label: 'Checklists realizados' }
+              ].map((sec) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => setHistorySection(sec.id)}
+                  className={`rounded-full px-4 py-2 text-sm font-medium ${
+                    historySection === sec.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 ring-1 ring-gray-200'
+                  }`}
                 >
-                  <option value="all">Servicios y reportes</option>
-                  <option value="services">Solo servicios</option>
-                  <option value="reports">Solo reportes / incidentes</option>
-                </select>
-              </div>
+                  {sec.label}
+                  {sec.id === 'checklists' && (
+                    <span className="ml-1 opacity-80">({completedInspections.length})</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="min-w-0">
                 <label className="mb-1 block text-xs font-medium text-gray-600">Unidad</label>
                 <select
@@ -745,14 +867,14 @@ const Maintenance = () => {
                     onClick={() => {
                       setHistoryVehicleFilter('');
                       setHistoryUnitSearch('');
-                      setHistoryTypeFilter('all');
                     }}
                   >
                     Limpiar
                   </Button>
                 )}
                 <p className="pb-2 text-sm text-gray-500">
-                  {filteredMaintenance.length} servicios · {filteredIncidents.length} reportes
+                  {filteredMaintenance.length} servicios · {filteredIncidents.length} incidentes ·{' '}
+                  {completedInspections.length} checklists
                 </p>
               </div>
             </div>
@@ -761,7 +883,7 @@ const Maintenance = () => {
             <Loading />
           ) : (
             <>
-              {(historyTypeFilter === 'all' || historyTypeFilter === 'services') && (
+              {historySection === 'services' && (
                 <div className="mb-6">
                   <h3 className="mb-2 text-sm font-semibold text-gray-800">
                     Servicios y mantenimiento
@@ -780,7 +902,7 @@ const Maintenance = () => {
                   )}
                 </div>
               )}
-              {(historyTypeFilter === 'all' || historyTypeFilter === 'reports') && (
+              {historySection === 'reports' && (
                 <div>
                   <h3 className="mb-2 text-sm font-semibold text-gray-800">
                     Reportes e incidentes
@@ -813,10 +935,127 @@ const Maintenance = () => {
                   )}
                 </div>
               )}
+              {historySection === 'checklists' && (
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-800">
+                    Checklists realizados por choferes
+                  </h3>
+                  <p className="mb-3 text-xs text-gray-500">
+                    Lista resumida. Haz clic en una fila para ver el detalle completo.
+                  </p>
+                  <Table
+                    columns={inspectionColumns}
+                    data={filteredInspections}
+                    onView={openInspectionDetail}
+                    sortable
+                  />
+                  {inspections.length === 0 && (
+                    <p className="mt-4 text-center text-sm text-gray-500">
+                      Aún no hay checklists. Ejecuta la migración{' '}
+                      <code className="text-xs">add_vehicle_inspections.sql</code> y comparte el link
+                      del chofer desde Flota.
+                    </p>
+                  )}
+                  {inspections.length > 0 && filteredInspections.length === 0 && (
+                    <p className="mt-2 text-center text-sm text-gray-500">
+                      No hay checklists con ese filtro.
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
         </>
       )}
+
+      <Modal
+        isOpen={Boolean(inspectionDetail)}
+        onClose={() => setInspectionDetail(null)}
+        title="Detalle de inspección"
+        size="lg"
+      >
+        {loadingInspectionDetail && <Loading />}
+        {inspectionDetail && !inspectionDetail.loading && (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-2 gap-2">
+              <p>
+                <span className="text-gray-500">Unidad:</span>{' '}
+                {inspectionDetail.vehicle_code || inspectionDetail.license_plate || `#${inspectionDetail.vehicle_id}`}
+              </p>
+              <p>
+                <span className="text-gray-500">Chofer:</span> {inspectionDetail.driver_name || '—'}
+              </p>
+              <p>
+                <span className="text-gray-500">Tipo:</span>{' '}
+                {INSPECTION_TYPE_LABELS[inspectionDetail.inspection_type] ||
+                  inspectionDetail.inspection_type}
+              </p>
+              <p>
+                <span className="text-gray-500">Estado:</span>{' '}
+                {inspectionDetail.status === 'completed' ? 'Completado' : 'En progreso'}
+              </p>
+              <p>
+                <span className="text-gray-500">Fecha:</span>{' '}
+                {formatDate(
+                  inspectionDetail.completed_at ||
+                    inspectionDetail.started_at ||
+                    inspectionDetail.created_at
+                )}
+              </p>
+              <p>
+                <span className="text-gray-500">Km:</span>{' '}
+                {inspectionDetail.mileage != null
+                  ? inspectionDetail.mileage.toLocaleString()
+                  : '—'}
+              </p>
+            </div>
+            {(() => {
+              const s =
+                typeof inspectionDetail.summary === 'string'
+                  ? JSON.parse(inspectionDetail.summary || '{}')
+                  : inspectionDetail.summary;
+              if (!s) return null;
+              return (
+                <div className="rounded-lg bg-gray-50 p-3">
+                  <p className="font-medium text-gray-800">Resumen</p>
+                  <p className="mt-1 text-gray-600">
+                    Revisados: {s.reviewed ?? '—'} · Correctos: {s.ok ?? 0} · Observaciones:{' '}
+                    {s.warnings ?? 0} · Críticos: {s.critical ?? 0}
+                    {(s.photoCount ?? 0) > 0 && ` · 📷 ${s.photoCount}`}
+                  </p>
+                  {(s.observations || []).length > 0 && (
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-700">
+                      {s.observations.map((o) => (
+                        <li key={o.key}>
+                          <strong>{o.label}:</strong> {o.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
+            {(() => {
+              let payload = inspectionDetail.payload;
+              if (typeof payload === 'string') {
+                try {
+                  payload = JSON.parse(payload);
+                } catch {
+                  payload = null;
+                }
+              }
+              const notes = payload?.answers?.notes_general?.text;
+              if (!notes) return null;
+              return (
+                <div>
+                  <p className="font-medium text-gray-800">Notas generales</p>
+                  <p className="whitespace-pre-wrap text-gray-600">{notes}</p>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={isServiceModalOpen}
@@ -952,6 +1191,33 @@ const Maintenance = () => {
             value={serviceForm.notes}
             onChange={(e) => setServiceForm({ ...serviceForm, notes: e.target.value })}
           />
+          <p className="text-xs text-gray-500 -mb-1">
+            Costo y lugar se guardan en el historial (y el costo como egreso) cuando cambias el km o
+            la fecha del último servicio. Si no cambian, se aplican al último registro de este servicio.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <FormInput
+              label="Costo"
+              type="number"
+              step="0.01"
+              min="0"
+              value={serviceForm.cost}
+              onChange={(e) => setServiceForm({ ...serviceForm, cost: e.target.value })}
+              placeholder="Ej. 1850"
+            />
+            <FormInput
+              label="Dónde se hizo"
+              value={serviceForm.workshop}
+              onChange={(e) => setServiceForm({ ...serviceForm, workshop: e.target.value })}
+              placeholder="Ej. Agua Azul, ProOne"
+            />
+          </div>
+          <FormSelect
+            label="Cuenta (opcional — el egreso queda en esa cuenta)"
+            value={serviceForm.payment_account_id}
+            onChange={(e) => setServiceForm({ ...serviceForm, payment_account_id: e.target.value })}
+            options={[{ value: '', label: '— Sin cuenta —' }, ...accountOptions]}
+          />
           <div className="flex justify-between gap-3 border-t pt-4">
             <div>
               {editingServiceItem && (
@@ -1085,6 +1351,13 @@ const Maintenance = () => {
             step="0.01"
             value={formData.cost}
             onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+          />
+
+          <FormInput
+            label="Dónde se hizo"
+            value={formData.workshop}
+            onChange={(e) => setFormData({ ...formData, workshop: e.target.value })}
+            placeholder="Taller, refaccionaria..."
           />
 
           <FormSelect

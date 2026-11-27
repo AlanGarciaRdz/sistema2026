@@ -14,7 +14,16 @@ export function vehicleReportPortalUrl(vehicle) {
   return `${window.location.origin}/sistema${vehicleReportPortalPath(vehicle)}`;
 }
 
-/** Mensaje para WhatsApp con link al portal de reportes de la unidad. */
+export function vehicleInspectionPortalPath(vehicle) {
+  const key = vehicleReportPortalKey(vehicle);
+  return `/u/${encodeURIComponent(key)}/inspeccion`;
+}
+
+export function vehicleUnitPortalUrl(vehicle) {
+  return vehicleReportPortalUrl(vehicle);
+}
+
+/** Mensaje para WhatsApp con link al portal del chofer. */
 export async function copyVehicleReportPortalLink(vehicle, setToast) {
   if (!vehicle?.id) {
     setToast?.({ message: 'La unidad no tiene ID para el link', type: 'error' });
@@ -27,14 +36,14 @@ export async function copyVehicleReportPortalLink(vehicle, setToast) {
     [vehicle.brand, vehicle.model].filter(Boolean).join(' ') ||
     `Unidad #${vehicle.id}`;
 
-  const url = vehicleReportPortalUrl(vehicle);
+  const hubUrl = vehicleUnitPortalUrl(vehicle);
   const text = [
-    'Reporta un incidente o daño de esta unidad:',
+    'Portal del chofer — incidentes e inspección de unidad:',
     '',
     `Unidad: ${label}`,
     vehicle.license_plate ? `Placas: ${vehicle.license_plate}` : null,
     '',
-    url
+    hubUrl
   ]
     .filter(Boolean)
     .join('\n');

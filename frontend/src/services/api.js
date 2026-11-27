@@ -106,6 +106,21 @@ export const getVehicleReportPortal = (vehicleKey) =>
 export const postVehicleReportPortal = (vehicleKey, data) =>
   api.post(`/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/reports`, data);
 
+export const getVehicleInspectionPortalContext = (vehicleKey) =>
+  api.get(`/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/inspections/context`);
+export const createVehicleInspectionPortal = (vehicleKey, data) =>
+  api.post(`/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/inspections`, data);
+export const updateVehicleInspectionPortal = (vehicleKey, inspectionId, data) =>
+  api.patch(
+    `/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/inspections/${inspectionId}`,
+    data
+  );
+export const completeVehicleInspectionPortal = (vehicleKey, inspectionId, data) =>
+  api.post(
+    `/vehicle-report-portal/${encodeURIComponent(vehicleKey)}/inspections/${inspectionId}/complete`,
+    data
+  );
+
 // Maintenance
 export const getMaintenance = () => api.get('/maintenance');
 export const getMaintenanceById = (id) => api.get(`/maintenance/${id}`);
@@ -123,6 +138,9 @@ export const getIncidentReports = () => api.get('/maintenance/incident-reports')
 export const createIncidentReport = (data) => api.post('/maintenance/incident-reports', data);
 export const updateIncidentReport = (id, data) => api.put(`/maintenance/incident-reports/${id}`, data);
 export const deleteIncidentReport = (id) => api.delete(`/maintenance/incident-reports/${id}`);
+export const getVehicleInspections = (params) =>
+  api.get('/maintenance/inspections', { params });
+export const getVehicleInspectionById = (id) => api.get(`/maintenance/inspections/${id}`);
 
 // Assignments
 export const getAssignments = () => api.get('/assignments');

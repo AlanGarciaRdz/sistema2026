@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { getVehicleReportPortal, postVehicleReportPortal } from '../services/api';
 import Loading from '../components/Loading';
 import Toast from '../components/Toast';
@@ -109,8 +109,13 @@ const VehicleReportPortal = () => {
     v.license_plate ||
     `Unidad #${v.id}`;
 
+  const hub = `/u/${encodeURIComponent(vehicleKey)}`;
+
   return (
     <div className="mx-auto min-h-screen max-w-lg bg-slate-50 p-4 pb-10">
+      <Link to={hub} className="mb-3 inline-block text-sm text-gray-500">
+        ← Portal unidad
+      </Link>
       <header className="mb-6 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-orange-100 p-2 text-orange-700">

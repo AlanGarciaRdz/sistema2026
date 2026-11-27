@@ -6,12 +6,14 @@ const {
   createContract,
   updateContract,
   bulkUpdateContractStatus,
+  bulkUpdateContractRefs,
   syncContractCalendar,
   deleteContract
 } = require('../controllers/contractsController');
 
 router.get('/', getAllContracts);
 router.patch('/bulk-status', bulkUpdateContractStatus);
+router.patch('/bulk-refs', bulkUpdateContractRefs);
 router.post('/:id/calendar-sync', syncContractCalendar);
 router.get('/:id', getContractById);
 router.post('/', createContract);

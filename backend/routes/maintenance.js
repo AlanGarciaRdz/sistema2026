@@ -19,8 +19,14 @@ const {
   updateIncidentReport,
   deleteIncidentReport
 } = require('../controllers/fleetMaintenanceController');
+const {
+  listInspections,
+  getInspectionById
+} = require('../controllers/vehicleInspectionController');
 
 router.get('/fleet', getFleetOverview);
+router.get('/inspections', listInspections);
+router.get('/inspections/:id', getInspectionById);
 router.patch('/vehicles/:vehicleId/mileage', updateVehicleMileage);
 router.get('/incident-reports', getIncidentReports);
 router.post('/incident-reports', createIncidentReport);

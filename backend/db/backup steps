@@ -1,0 +1,15 @@
+Tunel y dejar esta terminal abierta 
+ssh -N -L 15432:127.0.0.1:5432 rk
+
+en otra terminal 
+pg_dump -h 127.0.0.1 -p 15432 -U postgres -d transportation_db \
+  -Fc -f ~/transportation_db_prod_$(date +%Y%m%d).dump
+
+crear una db nueva 
+# crear base vacía
+createdb -h localhost -p 5432 -U postgres transportation_db_restore
+
+# restaurar
+pg_restore -h localhost -p 5432 -U postgres -d transportation_db_restore \
+  --no-owner --no-acl --verbose \
+  transportation_db_prod_20261106.dump

@@ -117,22 +117,23 @@ const getMaintenanceById = async (req, res) => {
 // Create new maintenance record and register as expense when payment account + cost exist
 const createMaintenance = async (req, res) => {
   try {
+    await ensureServiceTimeColumns();
     const {
       vehicle_id, maintenance_date, mileage, maintenance_type,
-      cost, payment_account_id, notes,
+      cost, payment_account_id, notes, workshop,
       next_service_km, interval_km, service_item_id
     } = req.body;
 
     const result = await pool.query(
       `INSERT INTO vehicle_maintenance (
         vehicle_id, maintenance_date, mileage, maintenance_type,
-        cost, payment_account_id, notes,
+        cost, payment_account_id, workshop, notes,
         next_service_km, interval_km, service_item_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *`,
       [
         vehicle_id, maintenance_date, mileage || null, maintenance_type,
-        cost || null, payment_account_id || null, notes,
+        cost || null, payment_account_id || null, workshop || null, notes,
         next_service_km || null, interval_km || null, service_item_id || null
       ]
     );
@@ -159,7 +160,8 @@ const createMaintenance = async (req, res) => {
         maintenance_id: maintenance.id,
         vehicle_id: vehicle_id || null,
         vehicle_label: vehicleLabel,
-        maintenance_type: maintenance_type || ''
+        maintenance_type: maintenance_type || '',
+        workshop: workshop || null
       });
 
       await pool.query(
@@ -181,24 +183,25 @@ const createMaintenance = async (req, res) => {
 // Update maintenance record and sync linked expense
 const updateMaintenance = async (req, res) => {
   try {
+    await ensureServiceTimeColumns();
     const { id } = req.params;
     const {
       vehicle_id, maintenance_date, mileage, maintenance_type,
-      cost, payment_account_id, notes,
+      cost, payment_account_id, notes, workshop,
       next_service_km, interval_km, service_item_id
     } = req.body;
 
     const result = await pool.query(
       `UPDATE vehicle_maintenance SET
         vehicle_id = $1, maintenance_date = $2, mileage = $3, maintenance_type = $4,
-        cost = $5, payment_account_id = $6, notes = $7,
-        next_service_km = $8, interval_km = $9, service_item_id = $10,
+        cost = $5, payment_account_id = $6, workshop = $7, notes = $8,
+        next_service_km = $9, interval_km = $10, service_item_id = $11,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $11
+      WHERE id = $12
       RETURNING *`,
       [
         vehicle_id, maintenance_date, mileage || null, maintenance_type,
-        cost || null, payment_account_id || null, notes,
+        cost || null, payment_account_id || null, workshop || null, notes,
         next_service_km || null, interval_km || null, service_item_id || null,
         id
       ]
@@ -236,7 +239,8 @@ const updateMaintenance = async (req, res) => {
         maintenance_id: parseInt(id, 10),
         vehicle_id: vehicle_id || null,
         vehicle_label: vehicleLabel,
-        maintenance_type: maintenance_type || ''
+        maintenance_type: maintenance_type || '',
+        workshop: workshop || null
       });
 
       if (expenseResult.rows.length > 0) {

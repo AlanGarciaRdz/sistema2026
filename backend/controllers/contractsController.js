@@ -1,7 +1,15 @@
 const axios = require('axios');
 const pool = require('../config/db');
+const { ensureContractAdminRefs } = require('../utils/ensureContractAdminRefs');
 
 const DEFAULT_GOOGLE_CALENDAR_NAME = 'Gua Gua';
+
+/** Normaliza folio OC/factura: trim; vacío → null. */
+const normalizeAdminRef = (value) => {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s.slice(0, 100);
+};
 
 /** Nombre del calendario en Google Calendar (misma cuenta que ejecuta el Apps Script). */
 const resolveGoogleCalendarDisplayName = () =>
@@ -38,6 +46,140 @@ const buildItineraryText = (itinerary) => {
     itineraryText = typeof itinerary === 'string' ? itinerary : '';
   }
   return itineraryText;
+};
+
+const formatMoneyMx = (n) =>
+  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(
+    Number.isFinite(Number(n)) ? Number(n) : 0
+  );
+
+const IVA_RATE_CAL = 0.16;
+
+/** Total a cobrar (con IVA si notes.includeIva). */
+const getContractAmountDueForCalendar = (row) => {
+  let notes = {};
+  try {
+    notes = row.notes ? JSON.parse(row.notes) : {};
+  } catch {
+    notes = {};
+  }
+  const subtotal = parseFloat(row.total_amount) || 0;
+  if (notes.includeIva) {
+    return Math.round(subtotal * (1 + IVA_RATE_CAL) * 100) / 100;
+  }
+  return Math.round(subtotal * 100) / 100;
+};
+
+/** Nombre corto legible desde vehicle_code (SPRINTER-2026 → Sprinter). */
+const friendlyUnitFromCode = (code) => {
+  const c = String(code || '').trim();
+  if (!c) return '';
+  const u = c.toUpperCase();
+  if (u.includes('SPRINTER')) return 'Sprinter';
+  if (u.includes('CRAFTER')) return 'Crafter';
+  if (u.includes('TRANSIT')) return 'Transit';
+  if (u.includes('STAREX')) return 'Starex';
+  if (u.includes('HIACE')) return 'Hiace';
+  if (u.includes('SUBURBAN')) return 'Suburban';
+  const base = c.replace(/[-_]\d{2,4}$/, '').replace(/_/g, ' ');
+  return base || c;
+};
+
+const formatUnidadCalendarLabel = (parts = {}) => {
+  const {
+    unitTypeFromNotes,
+    vehicleCode,
+    plate,
+    brand,
+    model
+  } = parts;
+  const segments = [];
+  const typeLabel =
+    (unitTypeFromNotes && String(unitTypeFromNotes).trim()) ||
+    friendlyUnitFromCode(vehicleCode) ||
+    (brand && model ? `${brand} ${model}`.trim() : '') ||
+    (brand || '') ||
+    '';
+  if (typeLabel) segments.push(String(typeLabel).trim());
+  const code = String(vehicleCode || '').trim();
+  if (code && typeLabel && code.toUpperCase() !== String(typeLabel).toUpperCase()) {
+    segments.push(code);
+  } else if (code && !typeLabel) {
+    segments.push(code);
+  }
+  const placa = String(plate || '').trim();
+  if (placa) segments.push(`Placa ${placa}`);
+  return segments.length ? segments.join(' · ') : '—';
+};
+
+const resolveUnidadLabel = (row, vehicleOverride) => {
+  if (vehicleOverride != null && String(vehicleOverride).trim() !== '') {
+    return String(vehicleOverride).trim();
+  }
+  try {
+    const notes = row.notes ? JSON.parse(row.notes) : {};
+    const v = notes.vehicle;
+    if (v && typeof v === 'object') {
+      return formatUnidadCalendarLabel({
+        unitTypeFromNotes: notes.unitType,
+        vehicleCode: v.vehicle_code,
+        plate: v.license_plate || v.plate,
+        brand: v.brand,
+        model: v.model
+      });
+    }
+    if (notes.unitType) {
+      const placa = row.vehicle_name || '';
+      return formatUnidadCalendarLabel({
+        unitTypeFromNotes: notes.unitType,
+        plate: placa
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+  return row.vehicle_name || '—';
+};
+
+/**
+ * Descripción única del evento (Apps Script debe usar solo este texto).
+ * Orden: contrato, cliente, origen, destino, unidad, chofer(es), precio, apartado, pendiente, itinerario.
+ */
+const buildCalendarDescription = (row, clientName, unidad, money = {}, driversLabel = '') => {
+  const total = money.totalDue != null ? money.totalDue : getContractAmountDueForCalendar(row);
+  const anticipo = money.anticipo != null ? money.anticipo : 0;
+  const pendiente =
+    money.pendiente != null ? money.pendiente : Math.max(0, Math.round((total - anticipo) * 100) / 100);
+
+  const lines = [
+    'CONTRATO: ' + (row.contract_number || ''),
+    'CLIENTE: ' + (clientName || '—'),
+    'ORIGEN: ' + (row.origin || '—'),
+    'DESTINO: ' + (row.destination || '—'),
+    'UNIDAD ASIGNADA: ' + (unidad || '—'),
+    'CHOFER: ' + (driversLabel && String(driversLabel).trim() ? driversLabel : '—')
+  ];
+  lines.push(
+    'PRECIO TOTAL: ' + formatMoneyMx(total),
+    anticipo > 0
+      ? 'APARTADO: ' + formatMoneyMx(anticipo)
+      : 'APARTADO: Sin apartado',
+    'PENDIENTE: ' + formatMoneyMx(pendiente)
+  );
+
+  let text = lines.join('\n');
+  const itinerario = buildItineraryText(row.itinerary);
+  const uiNotes = (() => {
+    try {
+      const n = row.notes ? JSON.parse(row.notes) : {};
+      return String(n.uiNotes || '').trim();
+    } catch {
+      return '';
+    }
+  })();
+  const detailBlock = [itinerario, uiNotes].filter(Boolean).join('\n\n');
+  if (detailBlock) text += '\n\nITINERARIO:\n' + detailBlock;
+  return text;
 };
 
 /** Offset fijo para combinar fecha DATE + hora del formulario (evita UTC medianoche). Ej. -06:00 Centro México. */
@@ -181,35 +323,17 @@ const parseCalendarScriptResponse = (data) => {
   return data;
 };
 
-const buildCalendarDescription = (row, clientName, unidad) => {
-  const lines = [
-    'CONTRATO: ' + (row.contract_number || ''),
-    'CLIENTE: ' + clientName,
-    'UNIDAD: ' + unidad,
-    'PASAJEROS: ' + (row.passenger_count != null ? row.passenger_count : ''),
-    'ORIGEN: ' + (row.origin || ''),
-    'DESTINO: ' + (row.destination || '')
-  ];
-  let text = lines.join('\n');
-  const itinerario = buildItineraryText(row.itinerary);
-  if (itinerario) text += '\n\nITINERARIO:\n' + itinerario;
-  return text;
-};
-
 /**
  * Contrato: usa departureTime/returnTime y calendarEventMode (dual, blocked, o salida sola).
  * Servicio: un evento con serviceTime.
  */
-const buildCalendarEventSpecs = (row, clientName, vehicleOverride) => {
-  const unidad =
-    vehicleOverride != null && String(vehicleOverride).trim() !== ''
-      ? vehicleOverride
-      : row.vehicle_name || '—';
+const buildCalendarEventSpecs = (row, clientName, vehicleOverride, money = {}, driversLabel = '') => {
+  const unidad = resolveUnidadLabel(row, vehicleOverride);
   const notes = parseContractNotesForCalendar(row.notes);
   const startDay = dateOnlyFromPgDate(row.start_date);
   const endDay = dateOnlyFromPgDate(row.end_date) || startDay;
   const tz = calendarTzOffset();
-  const baseDesc = buildCalendarDescription(row, clientName, unidad);
+  const baseDesc = buildCalendarDescription(row, clientName, unidad, money, driversLabel);
   const contrato = row.contract_number;
 
   const spec = (kind, suffix, fechaInicio, fechaFin, eventoId, ubicacion, etiqueta) => ({
@@ -220,7 +344,8 @@ const buildCalendarEventSpecs = (row, clientName, vehicleOverride) => {
     fechaFin,
     fechaInicioMs: epochFromWallIso(fechaInicio),
     fechaFinMs: epochFromWallIso(fechaFin),
-    descripcion: `${baseDesc}\n\n[${etiqueta}]`,
+    // Descripción completa una sola vez (el Apps Script no debe reconstruirla)
+    descripcion: baseDesc,
     ubicacion: ubicacion || '',
     contrato,
     cliente: clientName,
@@ -228,7 +353,7 @@ const buildCalendarEventSpecs = (row, clientName, vehicleOverride) => {
     pasajeros: row.passenger_count || 0,
     origen: row.origin || '',
     destino: row.destination || '',
-    itinerario: buildItineraryText(row.itinerary),
+    itinerario: '',
     etiqueta
   });
 
@@ -302,12 +427,9 @@ const buildCalendarEventSpecs = (row, clientName, vehicleOverride) => {
   ];
 };
 
-const buildGoogleCalendarPayload = (row, clientName, vehicleOverride) => {
-  const unidad =
-    vehicleOverride != null && String(vehicleOverride).trim() !== ''
-      ? vehicleOverride
-      : row.vehicle_name || '—';
-  const specs = buildCalendarEventSpecs(row, clientName, vehicleOverride);
+const buildGoogleCalendarPayload = (row, clientName, vehicleOverride, money = {}, driversLabel = '') => {
+  const unidad = resolveUnidadLabel(row, vehicleOverride);
+  const specs = buildCalendarEventSpecs(row, clientName, vehicleOverride, money, driversLabel);
   const first = specs[0];
   return ensureCalendarioNombre({
     calendarioNombre: resolveGoogleCalendarDisplayName(),
@@ -326,7 +448,7 @@ const buildGoogleCalendarPayload = (row, clientName, vehicleOverride) => {
     pasajeros: first?.pasajeros,
     cliente: first?.cliente,
     contrato: first?.contrato,
-    itinerario: first?.itinerario,
+    itinerario: '',
     eventoId: first?.eventoId || ''
   });
 };
@@ -337,10 +459,22 @@ const postGoogleCalendarPayload = async (calendarData) => {
     calendarData,
     {
       headers: { 'Content-Type': 'application/json' },
-      timeout: 15000
+      timeout: 20000,
+      maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 400
     }
   );
-  return parseCalendarScriptResponse(calendarResponse.data);
+  const parsed = parseCalendarScriptResponse(calendarResponse.data);
+  if (!parsed) {
+    const preview =
+      typeof calendarResponse.data === 'string'
+        ? calendarResponse.data.slice(0, 200)
+        : JSON.stringify(calendarResponse.data).slice(0, 200);
+    throw new Error(
+      `Respuesta inválida del Apps Script (¿URL de implementación incorrecta?): ${preview}`
+    );
+  }
+  return parsed;
 };
 
 /** Un evento en formato legacy (un POST = un evento en Calendar). */
@@ -353,17 +487,19 @@ const buildSingleEventPayload = (spec, calendarioNombre, unidad) =>
     fechaFin: spec.fechaFin,
     fechaInicioMs: spec.fechaInicioMs,
     fechaFinMs: spec.fechaFinMs,
+    // Texto completo ya armado; no enviar itinerario suelto para evitar duplicados en Apps Script viejo
     descripcion: spec.descripcion,
     ubicacion: spec.ubicacion,
-    origen: spec.origen,
-    destino: spec.destino,
-    pasajeros: spec.pasajeros,
-    cliente: spec.cliente,
-    contrato: spec.contrato,
-    itinerario: spec.itinerario,
+    origen: '',
+    destino: '',
+    pasajeros: '',
+    cliente: '',
+    contrato: '',
+    itinerario: '',
     eventoId: spec.eventoId || '',
     kind: spec.kind,
-    etiqueta: spec.etiqueta
+    etiqueta: spec.etiqueta,
+    useFullDescription: true
   });
 
 const persistCalendarIds = async (contractId, body, dualMode) => {
@@ -391,8 +527,124 @@ const persistCalendarIds = async (contractId, body, dualMode) => {
   }
 };
 
+const resolveDriversLabelFromNotes = (row) => {
+  try {
+    const notes = row.notes ? JSON.parse(row.notes) : {};
+    const names = [];
+    if (Array.isArray(notes.assignments)) {
+      for (const a of notes.assignments) {
+        if (a?.driver_name) names.push(String(a.driver_name).trim());
+      }
+    }
+    if (notes.assignment?.driver_name) {
+      names.push(String(notes.assignment.driver_name).trim());
+    }
+    if (notes.chofer) {
+      names.push(String(notes.chofer).trim());
+    }
+    return [...new Set(names.filter(Boolean))].join(', ');
+  } catch {
+    return '';
+  }
+};
+
+const resolveVehicleOverrideForCalendar = async (row, vehicleOverride) => {
+  if (vehicleOverride != null && String(vehicleOverride).trim() !== '') {
+    const ov = String(vehicleOverride).trim();
+    if (ov.includes('·') || ov.includes('(')) return ov;
+    try {
+      const notes = row.notes ? JSON.parse(row.notes) : {};
+      return formatUnidadCalendarLabel({
+        unitTypeFromNotes: notes.unitType,
+        vehicleCode: notes.vehicle?.vehicle_code,
+        plate: ov,
+        brand: notes.vehicle?.brand,
+        model: notes.vehicle?.model
+      });
+    } catch {
+      return ov;
+    }
+  }
+
+  let notesUnitType = '';
+  let notesVehicle = null;
+  try {
+    const notes = row.notes ? JSON.parse(row.notes) : {};
+    notesUnitType = notes.unitType || '';
+    notesVehicle = notes.vehicle || null;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const vRes = await pool.query(
+      `SELECT v.license_plate, v.vehicle_code, v.brand, v.model, v.vehicle_type
+       FROM assignments a
+       INNER JOIN vehicles v ON v.id = a.vehicle_id
+       WHERE a.contract_id = $1
+       ORDER BY a.driving_date DESC NULLS LAST, a.id DESC
+       LIMIT 1`,
+      [row.id]
+    );
+    const v = vRes.rows[0];
+    if (v) {
+      return formatUnidadCalendarLabel({
+        unitTypeFromNotes: notesUnitType || v.vehicle_type,
+        vehicleCode: v.vehicle_code,
+        plate: v.license_plate,
+        brand: v.brand,
+        model: v.model
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (notesVehicle || notesUnitType || row.vehicle_name) {
+    return formatUnidadCalendarLabel({
+      unitTypeFromNotes: notesUnitType,
+      vehicleCode: notesVehicle?.vehicle_code,
+      plate: notesVehicle?.license_plate || notesVehicle?.plate || row.vehicle_name,
+      brand: notesVehicle?.brand,
+      model: notesVehicle?.model
+    });
+  }
+
+  return null;
+};
+
 const syncRowToGoogleCalendar = async (row, clientName, vehicleOverride) => {
-  const calendarData = buildGoogleCalendarPayload(row, clientName, vehicleOverride);
+  const resolvedVehicle = await resolveVehicleOverrideForCalendar(row, vehicleOverride);
+
+  const [paidRes, driversRes] = await Promise.all([
+    pool.query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+       FROM payments WHERE contract_id = $1`,
+      [row.id]
+    ),
+    pool.query(
+      `SELECT DISTINCT d.name
+       FROM assignments a
+       INNER JOIN drivers d ON d.id = a.driver_id
+       WHERE a.contract_id = $1 AND d.name IS NOT NULL AND TRIM(d.name) <> ''
+       ORDER BY d.name`,
+      [row.id]
+    )
+  ]);
+  const totalDue = getContractAmountDueForCalendar(row);
+  const anticipo = parseFloat(paidRes.rows[0]?.total) || 0;
+  const pendiente = Math.max(0, Math.round((totalDue - anticipo) * 100) / 100);
+  const money = { totalDue, anticipo, pendiente };
+  const driversFromDb = driversRes.rows.map((r) => r.name).filter(Boolean).join(', ');
+  const driversLabel = driversFromDb || resolveDriversLabelFromNotes(row);
+
+  const calendarData = buildGoogleCalendarPayload(
+    row,
+    clientName,
+    resolvedVehicle,
+    money,
+    driversLabel
+  );
   const specs = calendarData.eventos;
   const dualMode = specs.length > 1;
   const calendarioNombre = calendarData.calendarioNombre;
@@ -402,6 +654,7 @@ const syncRowToGoogleCalendar = async (row, clientName, vehicleOverride) => {
   let eventoSalidaId = null;
   let eventoRegresoId = null;
 
+  // Un POST por evento (compatible con Apps Script legacy y nuevo useFullDescription).
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i];
     const singlePayload = buildSingleEventPayload(spec, calendarioNombre, unidad);
@@ -462,6 +715,7 @@ const syncRowToGoogleCalendar = async (row, clientName, vehicleOverride) => {
 // Get all contracts
 const getAllContracts = async (req, res) => {
   try {
+    await ensureContractAdminRefs();
     const result = await pool.query(`
       SELECT co.*, c.name as client_name, c.phone as client_phone, q.quote_number
       FROM contracts co
@@ -502,36 +756,41 @@ const getContractById = async (req, res) => {
 // Create new contract
 const createContract = async (req, res) => {
   try {
+    await ensureContractAdminRefs();
     const {
       contract_number, quote_id, client_id, start_date, end_date,
       origin, destination, itinerary, passenger_count, total_amount, status,
       origin_maps, destination_maps,
-      notes, vehicle_name, num_units, event_type
+      notes, vehicle_name, num_units, event_type,
+      purchase_order_ref, invoice_ref
     } = req.body;
     
     if (!contract_number) {
       return res.status(400).json({ success: false, error: 'Contract number is required' });
     }
+
+    const poRef = normalizeAdminRef(purchase_order_ref);
+    const invRef = normalizeAdminRef(invoice_ref);
     
     const result = await pool.query(
       `INSERT INTO contracts (
         contract_number, quote_id, client_id, start_date, end_date,
         origin, origin_maps, destination, destination_maps,
         itinerary, passenger_count, total_amount, status,
-        notes, num_units, event_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        notes, num_units, event_type, purchase_order_ref, invoice_ref
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING *`,
       [
         contract_number, quote_id, client_id, start_date, end_date,
         origin, origin_maps, destination, destination_maps,
         itinerary, passenger_count, total_amount,
-        status || 'Agendado', notes, num_units, event_type
+        status || 'Agendado', notes, num_units, event_type,
+        poRef, invRef
       ]
     );
     
     let newContract = result.rows[0];
-    
-    // Try to create Google Calendar event if vehicle_name is provided
+
     if (vehicle_name && process.env.GOOGLE_CALENDAR_SCRIPT_URL) {
       try {
         const clientResult = await pool.query('SELECT name FROM clients WHERE id = $1', [client_id]);
@@ -540,10 +799,10 @@ const createContract = async (req, res) => {
         const updateResult = await pool.query('SELECT * FROM contracts WHERE id = $1', [newContract.id]);
         newContract = updateResult.rows[0];
       } catch (calendarError) {
-        console.error('Error creating calendar event:', calendarError.message);
+        console.error('Error creating calendar event on create:', calendarError.message);
       }
     }
-    
+
     res.status(201).json({ success: true, data: newContract });
   } catch (error) {
     console.error('Error creating contract:', error);
@@ -554,16 +813,18 @@ const createContract = async (req, res) => {
 // Update contract
 const updateContract = async (req, res) => {
   try {
+    await ensureContractAdminRefs();
     const { id } = req.params;
     const {
       contract_number, quote_id, client_id, start_date, end_date,
       origin, origin_maps, destination, destination_maps,
       itinerary, passenger_count, total_amount, status,
-      notes, num_units, event_type, vehicle_name, calendar_event_id, calendar_return_event_id
+      notes, num_units, event_type, vehicle_name, calendar_event_id, calendar_return_event_id,
+      purchase_order_ref, invoice_ref
     } = req.body;
 
     const existing = await pool.query(
-      'SELECT calendar_event_id, calendar_return_event_id FROM contracts WHERE id = $1',
+      'SELECT calendar_event_id, calendar_return_event_id, purchase_order_ref, invoice_ref FROM contracts WHERE id = $1',
       [id]
     );
     if (existing.rows.length === 0) {
@@ -577,6 +838,12 @@ const updateContract = async (req, res) => {
       calendar_return_event_id !== undefined
         ? calendar_return_event_id
         : prev.calendar_return_event_id;
+    const finalPoRef =
+      purchase_order_ref !== undefined
+        ? normalizeAdminRef(purchase_order_ref)
+        : prev.purchase_order_ref;
+    const finalInvRef =
+      invoice_ref !== undefined ? normalizeAdminRef(invoice_ref) : prev.invoice_ref;
     
     const result = await pool.query(
       `UPDATE contracts SET
@@ -585,8 +852,9 @@ const updateContract = async (req, res) => {
         itinerary = $10, passenger_count = $11, total_amount = $12, status = $13,
         notes = $14, num_units = $15, event_type = $16, vehicle_name = $17,
         calendar_event_id = $18, calendar_return_event_id = $19,
+        purchase_order_ref = $20, invoice_ref = $21,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $20
+      WHERE id = $22
       RETURNING *`,
       [
         contract_number, quote_id, client_id, start_date, end_date,
@@ -595,6 +863,7 @@ const updateContract = async (req, res) => {
         status,
         notes, num_units, event_type, vehicle_name,
         finalCalendarEventId, finalCalendarReturnEventId,
+        finalPoRef, finalInvRef,
         id
       ]
     );
@@ -756,12 +1025,73 @@ const bulkUpdateContractStatus = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /contracts/bulk-refs
+ * Body: { ids: number[], purchase_order_ref?: string|null, invoice_ref?: string|null }
+ * Solo actualiza los campos presentes en el body (permite vaciar con "").
+ */
+const bulkUpdateContractRefs = async (req, res) => {
+  try {
+    await ensureContractAdminRefs();
+    const { ids, purchase_order_ref, invoice_ref } = req.body || {};
+    const idList = Array.isArray(ids)
+      ? [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+
+    if (idList.length === 0) {
+      return res.status(400).json({ success: false, error: 'Se requiere al menos un id de contrato' });
+    }
+
+    const hasPo = Object.prototype.hasOwnProperty.call(req.body || {}, 'purchase_order_ref');
+    const hasInv = Object.prototype.hasOwnProperty.call(req.body || {}, 'invoice_ref');
+    if (!hasPo && !hasInv) {
+      return res.status(400).json({
+        success: false,
+        error: 'Indique purchase_order_ref y/o invoice_ref'
+      });
+    }
+
+    const sets = [];
+    const params = [];
+    let p = 1;
+    if (hasPo) {
+      sets.push(`purchase_order_ref = $${p++}`);
+      params.push(normalizeAdminRef(purchase_order_ref));
+    }
+    if (hasInv) {
+      sets.push(`invoice_ref = $${p++}`);
+      params.push(normalizeAdminRef(invoice_ref));
+    }
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(idList);
+
+    const result = await pool.query(
+      `UPDATE contracts
+       SET ${sets.join(', ')}
+       WHERE id = ANY($${p}::int[])
+       RETURNING id, contract_number, purchase_order_ref, invoice_ref`,
+      params
+    );
+
+    res.json({
+      success: true,
+      data: result.rows,
+      updated: result.rowCount,
+      requested: idList.length
+    });
+  } catch (error) {
+    console.error('Error bulk updating contract refs:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getAllContracts,
   getContractById,
   createContract,
   updateContract,
   bulkUpdateContractStatus,
+  bulkUpdateContractRefs,
   syncContractCalendar,
   deleteContract
 };

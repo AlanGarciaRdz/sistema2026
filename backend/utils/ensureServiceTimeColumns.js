@@ -13,6 +13,10 @@ async function ensureServiceTimeColumns() {
       ADD COLUMN IF NOT EXISTS critical_before_days INTEGER,
       ADD COLUMN IF NOT EXISTS next_due_date DATE
   `);
+  await pool.query(`
+    ALTER TABLE vehicle_maintenance
+      ADD COLUMN IF NOT EXISTS workshop VARCHAR(255)
+  `);
   ready = true;
 }
 

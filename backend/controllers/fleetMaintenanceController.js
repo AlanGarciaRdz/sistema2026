@@ -108,6 +108,59 @@ function hasLastServiceEvent(km, dateStr) {
   return parseServiceKm(km) != null || normalizeServiceDate(dateStr) != null;
 }
 
+function parseServiceCost(value) {
+  if (value == null || value === '') return null;
+  const n = parseFloat(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+function parseAccountId(value) {
+  if (value == null || value === '') return null;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function insertMaintenanceExpense({
+  maintenanceId,
+  vehicleId,
+  maintenanceType,
+  cost,
+  paymentAccountId,
+  expenseDate,
+  workshop
+}) {
+  if (!cost || cost <= 0) return;
+  let vehicleLabel = 'Sin unidad';
+  if (vehicleId) {
+    const vResult = await pool.query(
+      'SELECT vehicle_code, license_plate, brand, model FROM vehicles WHERE id = $1',
+      [vehicleId]
+    );
+    if (vResult.rows[0]) {
+      const v = vResult.rows[0];
+      vehicleLabel =
+        v.vehicle_code ||
+        v.license_plate ||
+        `${v.brand || ''} ${v.model || ''}`.trim() ||
+        'Sin unidad';
+    }
+  }
+  const expenseNotes = JSON.stringify({
+    maintenance_id: maintenanceId,
+    vehicle_id: vehicleId || null,
+    vehicle_label: vehicleLabel,
+    maintenance_type: maintenanceType || '',
+    workshop: workshop || null
+  });
+  await pool.query(
+    `INSERT INTO expenses (
+      contract_id, expense_type, amount, payment_account_id,
+      business_unit, expense_date, notes
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [null, 'Mantenimiento', cost, paymentAccountId, null, expenseDate, expenseNotes]
+  );
+}
+
 async function logServiceItemToMaintenanceHistory({
   vehicleId,
   serviceItemId,
@@ -116,7 +169,10 @@ async function logServiceItemToMaintenanceHistory({
   lastServiceDate,
   nextDueKm,
   intervalKm,
-  notes
+  notes,
+  cost,
+  workshop,
+  paymentAccountId
 }) {
   if (!vehicleId || !serviceItemId) return false;
   const km = parseServiceKm(lastServiceKm);
@@ -125,23 +181,101 @@ async function logServiceItemToMaintenanceHistory({
 
   const userNotes = notes && String(notes).trim();
   const historyNotes = userNotes || 'Registrado desde servicio programado';
+  const costNum = parseServiceCost(cost);
+  const place = workshop && String(workshop).trim() ? String(workshop).trim() : null;
+  const accountId = parseAccountId(paymentAccountId);
 
-  await pool.query(
+  const inserted = await pool.query(
     `INSERT INTO vehicle_maintenance (
       vehicle_id, maintenance_date, mileage, maintenance_type,
+      cost, payment_account_id, workshop,
       notes, next_service_km, interval_km, service_item_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING id`,
     [
       vehicleId,
       dateStr,
       km,
       title,
+      costNum,
+      accountId,
+      place,
       historyNotes,
       parseServiceKm(nextDueKm),
       parseServiceKm(intervalKm),
       serviceItemId
     ]
   );
+
+  await insertMaintenanceExpense({
+    maintenanceId: inserted.rows[0].id,
+    vehicleId,
+    maintenanceType: title,
+    cost: costNum,
+    paymentAccountId: accountId,
+    expenseDate: dateStr,
+    workshop: place
+  });
+  return true;
+}
+
+/** Si no cambió km/fecha, el costo y el lugar se aplican al último historial de ese servicio. */
+async function attachCostToLatestServiceHistory({
+  serviceItemId,
+  vehicleId,
+  title,
+  cost,
+  workshop,
+  paymentAccountId
+}) {
+  const costNum = parseServiceCost(cost);
+  const place = workshop && String(workshop).trim() ? String(workshop).trim() : null;
+  const accountId = parseAccountId(paymentAccountId);
+  if (!costNum && !place) return false;
+
+  const latest = await pool.query(
+    `SELECT id, maintenance_date, cost, payment_account_id, workshop
+     FROM vehicle_maintenance
+     WHERE service_item_id = $1
+     ORDER BY maintenance_date DESC NULLS LAST, id DESC
+     LIMIT 1`,
+    [serviceItemId]
+  );
+  if (!latest.rows[0]) return false;
+
+  const row = latest.rows[0];
+  const nextCost = costNum != null ? costNum : row.cost;
+  const nextPlace = place != null ? place : row.workshop;
+  const nextAccount = accountId != null ? accountId : row.payment_account_id;
+
+  await pool.query(
+    `UPDATE vehicle_maintenance
+     SET cost = $1, workshop = $2, payment_account_id = $3, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $4`,
+    [nextCost, nextPlace, nextAccount, row.id]
+  );
+
+  if (costNum) {
+    const expenseResult = await pool.query(
+      `SELECT id FROM expenses WHERE notes IS NOT NULL AND (
+        notes::text LIKE '%"maintenance_id":' || $1 || ',%' OR
+        notes::text LIKE '%"maintenance_id":' || $1 || '}%'
+      )`,
+      [String(row.id)]
+    );
+    if (expenseResult.rows[0]) {
+      await pool.query('DELETE FROM expenses WHERE id = $1', [expenseResult.rows[0].id]);
+    }
+    await insertMaintenanceExpense({
+      maintenanceId: row.id,
+      vehicleId,
+      maintenanceType: title,
+      cost: nextCost,
+      paymentAccountId: nextAccount,
+      expenseDate: normalizeServiceDate(row.maintenance_date) || new Date().toISOString().slice(0, 10),
+      workshop: nextPlace
+    });
+  }
   return true;
 }
 
@@ -262,7 +396,7 @@ const getFleetOverview = async (req, res) => {
   try {
     await ensureServiceTimeColumns();
     const vehiclesResult = await pool.query(`
-      SELECT id, vehicle_code, brand, model, license_plate, fuel_type, status,
+      SELECT id, vehicle_code, brand, model, license_plate, vin_number, motor, fuel_type, status,
              current_mileage, current_mileage_at
       FROM vehicles
       WHERE COALESCE(status, 'Active') ILIKE 'active'
@@ -421,7 +555,10 @@ const createServiceItem = async (req, res) => {
       next_due_date,
       last_service_km,
       last_service_date,
-      notes
+      notes,
+      cost,
+      workshop,
+      payment_account_id
     } = req.body;
 
     const isDays = String(schedule_basis || 'km').toLowerCase() === 'days';
@@ -483,7 +620,10 @@ const createServiceItem = async (req, res) => {
         lastServiceDate: last_service_date,
         nextDueKm: row.next_due_km,
         intervalKm: row.interval_km,
-        notes
+        notes,
+        cost,
+        workshop,
+        paymentAccountId: payment_account_id
       });
     }
     res.status(201).json({ success: true, data: row, history_logged: historyLogged });
@@ -518,7 +658,10 @@ const updateServiceItem = async (req, res) => {
       last_service_km,
       last_service_date,
       notes,
-      is_active
+      is_active,
+      cost,
+      workshop,
+      payment_account_id
     } = req.body;
 
     const isDays = String(schedule_basis || prev.schedule_basis || 'km').toLowerCase() === 'days';
@@ -604,7 +747,19 @@ const updateServiceItem = async (req, res) => {
         lastServiceDate: last_service_date,
         nextDueKm: row.next_due_km,
         intervalKm: row.interval_km,
-        notes
+        notes,
+        cost,
+        workshop,
+        paymentAccountId: payment_account_id
+      });
+    } else if (parseServiceCost(cost) || (workshop && String(workshop).trim())) {
+      historyLogged = await attachCostToLatestServiceHistory({
+        serviceItemId: row.id,
+        vehicleId: row.vehicle_id,
+        title: row.title,
+        cost,
+        workshop,
+        paymentAccountId: payment_account_id
       });
     }
 

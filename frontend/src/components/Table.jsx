@@ -1,6 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { Edit, Trash2, Eye, ChevronUp, ChevronDown } from 'lucide-react';
 
+const cellStyle = (column) => {
+  if (column.width) return { width: column.width, maxWidth: column.width };
+  if (column.maxWidth) return { maxWidth: column.maxWidth };
+  return undefined;
+};
+
+const cellClassName = (column) => {
+  const base = 'px-3 py-2.5 text-sm text-gray-900 align-middle';
+  if (column.className) return `${base} ${column.className}`;
+  if (column.truncate) return `${base} max-w-[12rem] truncate`;
+  if (column.nowrap) return `${base} whitespace-nowrap`;
+  // Por defecto: permite cortar palabras largas (VIN, códigos) sin forzar scroll
+  return `${base} whitespace-normal break-words`;
+};
+
 const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortable, canEditRow }) => {
   const hasActions = onView || onEdit || onDelete || customActions;
   const [sortKey, setSortKey] = useState(null);
@@ -35,46 +50,70 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
     }
   };
 
-  const displayData = sortable ? sortedData : (data || []);
+  const displayData = sortable ? sortedData : data || [];
+
+  const cellTitle = (column, row, rendered) => {
+    if (column.title != null) {
+      return typeof column.title === 'function' ? column.title(row) : column.title;
+    }
+    if (column.wrap || column.nowrap || column.render) return undefined;
+    const raw = row[column.accessor];
+    if (raw == null || raw === '') return undefined;
+    const text = String(raw);
+    return text.length > 18 ? text : undefined;
+  };
 
   return (
     <>
       {/* Vista móvil: tarjetas */}
-      <div className="block sm:hidden space-y-2">
+      <div className="block space-y-2 sm:hidden">
         {displayData && displayData.length > 0 ? (
           displayData.map((row, rowIndex) => (
-            <div key={rowIndex} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div
+              key={rowIndex}
+              className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+            >
               <div className="p-4">
                 {columns.map((column, colIndex) => {
                   const value = column.render ? column.render(row) : row[column.accessor];
                   if (!value && value !== 0) return null;
                   return (
-                    <div key={colIndex} className="flex flex-col mb-2 last:mb-0">
-                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">
+                    <div key={colIndex} className="mb-2 flex flex-col last:mb-0">
+                      <span className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
                         {column.header}
                       </span>
-                      <span className="text-sm text-gray-900 break-words leading-snug">
-                        {value}
-                      </span>
+                      <span className="break-words text-sm leading-snug text-gray-900">{value}</span>
                     </div>
                   );
                 })}
               </div>
               {hasActions && (
-                <div className="flex justify-end gap-1 px-3 py-2 bg-gray-50 border-t border-gray-100">
+                <div className="flex justify-end gap-1 border-t border-gray-100 bg-gray-50 px-3 py-2">
                   {customActions && customActions(row)}
                   {onView && (
-                    <button onClick={() => onView(row)} className="text-blue-600 hover:text-blue-900 p-2 rounded-lg hover:bg-blue-100 transition-colors" title="Ver">
+                    <button
+                      onClick={() => onView(row)}
+                      className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-900"
+                      title="Ver"
+                    >
                       <Eye size={17} />
                     </button>
                   )}
                   {onEdit && (!canEditRow || canEditRow(row)) && (
-                    <button onClick={() => onEdit(row)} className="text-green-600 hover:text-green-900 p-2 rounded-lg hover:bg-green-100 transition-colors" title="Editar">
+                    <button
+                      onClick={() => onEdit(row)}
+                      className="rounded-lg p-2 text-green-600 transition-colors hover:bg-green-100 hover:text-green-900"
+                      title="Editar"
+                    >
                       <Edit size={17} />
                     </button>
                   )}
                   {onDelete && (
-                    <button onClick={() => onDelete(row)} className="text-red-600 hover:text-red-900 p-2 rounded-lg hover:bg-red-100 transition-colors" title="Eliminar">
+                    <button
+                      onClick={() => onDelete(row)}
+                      className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-100 hover:text-red-900"
+                      title="Eliminar"
+                    >
                       <Trash2 size={17} />
                     </button>
                   )}
@@ -83,86 +122,91 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
             </div>
           ))
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
             No hay datos disponibles
           </div>
         )}
       </div>
 
-      {/* Vista desktop: tabla normal */}
-      <div className="hidden sm:block overflow-x-auto bg-white rounded-lg shadow-sm border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200">
+      {/* Vista desktop */}
+      <div className="hidden w-full overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm sm:block">
+        <table className="w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               {columns.map((column, index) => {
                 const key = column.sortAccessor || column.accessor;
                 const canSort = sortable && key;
                 const isActive = sortKey === key;
-                const widthStyle = column.width
-                  ? { width: column.width, maxWidth: column.width }
-                  : column.maxWidth
-                    ? { maxWidth: column.maxWidth }
-                    : undefined;
                 return (
                   <th
-                    style={widthStyle}
+                    style={cellStyle(column)}
                     key={index}
                     onClick={() => canSort && handleSort(column)}
-                    className={`sticky top-0 z-10 bg-gray-50 px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider shadow-[inset_0_-1px_0_0_rgb(229,231,235)] ${
-                      canSort ? 'cursor-pointer select-none hover:bg-gray-100 transition-colors' : ''
+                    className={`sticky top-0 z-10 bg-gray-50 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-700 shadow-[inset_0_-1px_0_0_rgb(229,231,235)] ${
+                      canSort ? 'cursor-pointer select-none transition-colors hover:bg-gray-100' : ''
                     }`}
                   >
                     <span className="inline-flex items-center gap-1">
                       {column.headerRender ? column.headerRender() : column.header}
-                      {canSort && isActive && (
-                        sortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                      )}
+                      {canSort &&
+                        isActive &&
+                        (sortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                     </span>
                   </th>
                 );
               })}
               {hasActions && (
-                <th className="sticky top-0 z-10 bg-gray-50 px-4 sm:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider shadow-[inset_0_-1px_0_0_rgb(229,231,235)]">
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-gray-50 px-2 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-700 shadow-[inset_0_-1px_0_0_rgb(229,231,235)]">
                   Acciones
                 </th>
               )}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="divide-y divide-gray-200 bg-white">
             {displayData && displayData.length > 0 ? (
               displayData.map((row, rowIndex) => (
-                <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
-                  {columns.map((column, colIndex) => (
-                    <td
-                      key={colIndex}
-                      className={`px-4 sm:px-6 py-3 sm:py-4 text-sm text-gray-900 ${column.wrap ? 'whitespace-normal' : 'whitespace-nowrap'}`}
-                      style={
-                        column.width
-                          ? { width: column.width, maxWidth: column.width }
-                          : column.maxWidth
-                            ? { maxWidth: column.maxWidth }
-                            : undefined
-                      }
-                    >
-                      {column.render ? column.render(row) : row[column.accessor]}
-                    </td>
-                  ))}
+                <tr key={rowIndex} className="transition-colors hover:bg-gray-50">
+                  {columns.map((column, colIndex) => {
+                    const rendered = column.render ? column.render(row) : row[column.accessor];
+                    return (
+                      <td
+                        key={colIndex}
+                        className={cellClassName(column)}
+                        style={cellStyle(column)}
+                        title={cellTitle(column, row, rendered)}
+                      >
+                        {rendered}
+                      </td>
+                    );
+                  })}
                   {hasActions && (
-                    <td className="px-4 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-1 sm:gap-2">
+                    <td className="whitespace-nowrap px-2 py-2.5 text-right text-sm font-medium">
+                      <div className="flex justify-end gap-0.5">
                         {customActions && customActions(row)}
                         {onView && (
-                          <button onClick={() => onView(row)} className="text-blue-600 hover:text-blue-900 transition-colors p-1" title="Ver">
+                          <button
+                            onClick={() => onView(row)}
+                            className="p-1 text-blue-600 transition-colors hover:text-blue-900"
+                            title="Ver"
+                          >
                             <Eye size={18} />
                           </button>
                         )}
                         {onEdit && (!canEditRow || canEditRow(row)) && (
-                          <button onClick={() => onEdit(row)} className="text-green-600 hover:text-green-900 transition-colors p-1" title="Editar">
+                          <button
+                            onClick={() => onEdit(row)}
+                            className="p-1 text-green-600 transition-colors hover:text-green-900"
+                            title="Editar"
+                          >
                             <Edit size={18} />
                           </button>
                         )}
                         {onDelete && (
-                          <button onClick={() => onDelete(row)} className="text-red-600 hover:text-red-900 transition-colors p-1" title="Eliminar">
+                          <button
+                            onClick={() => onDelete(row)}
+                            className="p-1 text-red-600 transition-colors hover:text-red-900"
+                            title="Eliminar"
+                          >
                             <Trash2 size={18} />
                           </button>
                         )}
@@ -173,7 +217,10 @@ const Table = ({ columns, data, onView, onEdit, onDelete, customActions, sortabl
               ))
             ) : (
               <tr>
-                <td colSpan={columns.length + 1} className="px-6 py-8 text-center text-gray-500">
+                <td
+                  colSpan={columns.length + (hasActions ? 1 : 0)}
+                  className="px-6 py-8 text-center text-gray-500"
+                >
                   No hay datos disponibles
                 </td>
               </tr>

@@ -31,11 +31,11 @@ function MainLayout() {
         onToggleCollapse={() => setIsSidebarCollapsed((c) => !c)}
       />
       <main
-        className={`flex-1 transition-all duration-300 pt-4 ${
+        className={`min-w-0 flex-1 overflow-x-hidden transition-all duration-300 pt-4 ${
           isSidebarCollapsed ? 'lg:ml-0' : 'lg:ml-64'
         }`}
       >
-        <div className="container mx-auto max-w-7xl">
+        <div className="mx-auto w-full max-w-7xl px-3 sm:px-4">
           <Outlet />
         </div>
       </main>

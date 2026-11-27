@@ -122,33 +122,39 @@ const Vehicles = () => {
   };
 
   const columns = [
-    { header: 'Código', accessor: 'vehicle_code' },
-    { header: 'Marca', accessor: 'brand' },
-    { header: 'Modelo', accessor: 'model' },
-    { header: 'Año', accessor: 'year' },
-    { header: 'Placas', accessor: 'license_plate' },
+    { header: 'Código', accessor: 'vehicle_code', wrap: true, maxWidth: '9rem' },
+    { header: 'Marca', accessor: 'brand', nowrap: true },
+    { header: 'Modelo', accessor: 'model', nowrap: true },
+    { header: 'Año', accessor: 'year', nowrap: true, width: '4rem' },
+    { header: 'Placas', accessor: 'license_plate', nowrap: true },
     {
       header: 'VIN',
       accessor: 'vin_number',
+      truncate: true,
+      maxWidth: '10rem',
+      title: (row) => row.vin_number || undefined,
       render: (row) =>
         row.vin_number ? (
-          <span className="font-mono text-xs text-gray-700" title={row.vin_number}>
-            {row.vin_number}
-          </span>
+          <span className="block truncate font-mono text-xs text-gray-700">{row.vin_number}</span>
         ) : (
           '—'
         )
     },
-    { header: 'Capacidad', accessor: 'passenger_capacity' },
-    { 
-      header: 'Estado', 
+    { header: 'Cap.', accessor: 'passenger_capacity', nowrap: true, width: '3.5rem' },
+    {
+      header: 'Estado',
       accessor: 'status',
+      nowrap: true,
       render: (row) => (
-        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-          row.status === 'Active' ? 'bg-green-100 text-green-800' :
-          row.status === 'Maintenance' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
+        <span
+          className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${
+            row.status === 'Active'
+              ? 'bg-green-100 text-green-800'
+              : row.status === 'Maintenance'
+                ? 'bg-yellow-100 text-yellow-800'
+                : 'bg-gray-100 text-gray-800'
+          }`}
+        >
           {row.status}
         </span>
       )
